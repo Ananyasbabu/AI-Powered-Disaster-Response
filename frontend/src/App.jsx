@@ -7,8 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ReportIncident from './pages/ReportIncident';
-import React from 'react';
-import AdminDashboard from './pages/AdminDashboard'; // Adjust path if your folder structure differs
+import AdminDashboard from './pages/AdminDashboard'; 
 
 export default function App() {
   const { user, logout } = useContext(AuthContext);
@@ -43,7 +42,6 @@ export default function App() {
           )}
         </nav>
       </header>
-      
 
       <main className="page-container">
         <Routes>
@@ -53,8 +51,10 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/report" element={<ProtectedRoute><ReportIncident /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
-          {/* Admin Route */}
+          
+          {/* Admin Route directly rendering AdminDashboard */}
           <Route path="/admin" element={<AdminDashboard />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
