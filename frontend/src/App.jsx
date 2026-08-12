@@ -7,16 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ReportIncident from './pages/ReportIncident';
-import React from 'react';
-import AdminDashboard from './pages/AdminDashboard'; // Adjust path if your folder structure differs
-
-export default function App() {
-  return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f4f6f8' }}>
-      <AdminDashboard />
-    </div>
-  );
-}
+import AdminDashboard from './pages/AdminDashboard'; 
 
 export default function App() {
   const { user, logout } = useContext(AuthContext);
@@ -37,6 +28,7 @@ export default function App() {
               <Link to="/dashboard">Dashboard</Link>
               <Link to="/report">Report</Link>
               <Link to="/alerts">Alerts</Link>
+              <Link to="/admin">Admin Portal</Link>
               <button className="ghost-button" onClick={handleLogout}>
                 Logout
               </button>
@@ -45,11 +37,11 @@ export default function App() {
             <>
               <Link to="/login">Login</Link>
               <Link to="/register">Register</Link>
+              <Link to="/admin">Admin Portal</Link>
             </>
           )}
         </nav>
       </header>
-      
 
       <main className="page-container">
         <Routes>
@@ -59,6 +51,10 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/report" element={<ProtectedRoute><ReportIncident /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+          
+          {/* Admin Route directly rendering AdminDashboard */}
+          <Route path="/admin" element={<AdminDashboard />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

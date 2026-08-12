@@ -3,6 +3,9 @@ import React, { useState, useEffect } from 'react';
 const API_BASE = 'http://localhost:5000/api/admin';
 
 export default function AdminDashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passcode, setPasscode] = useState('');
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState({ total_incidents: 0, pending_incidents: 0, verified_incidents: 0, total_shelters: 0 });
   const [incidents, setIncidents] = useState([]);
@@ -15,10 +18,21 @@ export default function AdminDashboard() {
   const [alertForm, setAlertForm] = useState({ region: '', severity: 'CRITICAL', message: '' });
 
   useEffect(() => {
-    fetchStats();
-    fetchIncidents();
-    fetchShelters();
-  }, []);
+    if (isAuthenticated) {
+      fetchStats();
+      fetchIncidents();
+      fetchShelters();
+    }
+  }, [isAuthenticated]);
+
+  const handleVerify = (e) => {
+    e.preventDefault();
+    if (passcode === 'admin123') { // Replace with your admin passcode
+      setIsAuthenticated(true);
+    } else {
+      alert('Invalid Passcode!');
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -77,6 +91,29 @@ export default function AdminDashboard() {
     setAlertForm({ region: '', severity: 'CRITICAL', message: '' });
   };
 
+  // Passcode Lock View
+  if (!isAuthenticated) {
+    return (
+      <div style={{ maxWidth: '400px', margin: '80px auto', padding: '30px', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', borderRadius: '8px', backgroundColor: '#fff' }}>
+        <h2>🔒 Admin Access</h2>
+        <p>Please enter the admin passcode to view the control panel.</p>
+        <form onSubmit={handleVerify}>
+          <input
+            type="password"
+            placeholder="Enter passcode"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            style={{ width: '100%', padding: '10px', margin: '15px 0', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
+          />
+          <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#007bff', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+            Verify Access
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // Full Admin Dashboard View
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
       <h2>🚨 Admin Control Tower</h2>
