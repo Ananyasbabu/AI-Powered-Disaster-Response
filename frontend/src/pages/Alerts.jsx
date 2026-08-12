@@ -31,7 +31,6 @@ export default function Alerts() {
           <h1>Emergency alerts</h1>
           <p>Stay informed with real-time warnings, shelter updates and safe route changes.</p>
         </div>
-        <div className="alert-pill severity-high">{currentAlert.severity}</div>
       </div>
 
       <div className="card alerts-list-card">

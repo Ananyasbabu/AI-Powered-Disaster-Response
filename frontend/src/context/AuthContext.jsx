@@ -4,7 +4,8 @@ const AuthContext = createContext();
 const STORAGE_KEY = 'disasterGuardUser';
 
 const initialAccounts = [
-  { username: 'citizen', password: 'disaster123', name: 'Citizen Hero', email: 'citizen@example.com' },
+  { username: 'citizen', password: 'disaster123', name: 'Citizen Hero', email: 'citizen@example.com', role: 'citizen' },
+  { username: 'admin', password: 'admin123', name: 'Disaster Admin', email: 'admin@example.com', role: 'admin' },
 ];
 
 export function AuthProvider({ children }) {
@@ -33,8 +34,14 @@ export function AuthProvider({ children }) {
     if (!account) {
       return { success: false, message: 'Invalid username or password.' };
     }
-    setUser({ username: account.username, name: account.name, email: account.email });
-    return { success: true };
+    const loggedInUser = {
+      username: account.username,
+      name: account.name,
+      email: account.email,
+      role: account.role || 'citizen',
+    };
+    setUser(loggedInUser);
+    return { success: true, user: loggedInUser };
   };
 
   const register = (name, email, username, password) => {
@@ -44,9 +51,9 @@ export function AuthProvider({ children }) {
     if (accounts.some((item) => item.email.toLowerCase() === email.toLowerCase())) {
       return { success: false, message: 'Email already in use.' };
     }
-    const newAccount = { name, email, username, password };
+    const newAccount = { name, email, username, password, role: 'citizen' };
     setAccounts((previous) => [...previous, newAccount]);
-    setUser({ username, name, email });
+    setUser({ username, name, email, role: 'citizen' });
     return { success: true };
   };
 

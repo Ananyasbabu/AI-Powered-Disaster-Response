@@ -3,9 +3,9 @@ import { AuthContext } from '../context/AuthContext';
 
 const floodZones = [
   { name: 'Riverfront', level: 'High', color: '#ea4c89' },
-  { name: 'North Hills', level: 'Moderate', color: '#f8a52f' },
-  { name: 'Green Valley', level: 'Low', color: '#34a853' },
-  { name: 'East Lakeside', level: 'Critical', color: '#d32f2f' },
+  { name: 'North Hills', level: 'Moderate', color: '#f1e04b' },
+  { name: 'Green Valley', level: 'Low', color: '#49e673' },
+  { name: 'East Lakeside', level: 'Critical', color: '#f30606' },
 ];
 
 const shelters = [
@@ -25,8 +25,8 @@ export default function Dashboard() {
 
   const alertMessage = useMemo(
     () => ({
-      title: 'Flash flood warning issued',
-      details: 'Heavy rainfall expected in the riverfront and east lakeside zones in the next 2 hours. Move to the nearest shelter immediately.',
+      title: ' ',
+      details: '  ',
     }),
     []
   );

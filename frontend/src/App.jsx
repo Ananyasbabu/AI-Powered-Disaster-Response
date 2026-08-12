@@ -2,12 +2,12 @@ import { useContext } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthContext } from './context/AuthContext';
+import AdminDashboard from './pages/AdminDashboard';
 import Alerts from './pages/Alerts';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ReportIncident from './pages/ReportIncident';
-import AdminDashboard from './pages/AdminDashboard'; 
 
 export default function App() {
   const { user, logout } = useContext(AuthContext);
@@ -18,6 +18,9 @@ export default function App() {
     navigate('/login');
   };
 
+  // Helper for consistent role-based redirection
+  const getDefaultRoute = () => (user?.role === 'admin' ? '/admin' : '/dashboard');
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -25,10 +28,19 @@ export default function App() {
         <nav className="nav-links">
           {user ? (
             <>
-              <Link to="/dashboard">Dashboard</Link>
-              <Link to="/report">Report</Link>
-              <Link to="/alerts">Alerts</Link>
-              <Link to="/admin">Admin Portal</Link>
+              {user.role === 'admin' ? (
+                <>
+                  <Link to="/admin">Admin Dashboard</Link>
+                  <Link to="/alerts">Alerts</Link>
+                </>
+              ) : (
+                <>
+                  <Link to="/dashboard">Dashboard</Link>
+                  <Link to="/report">Report</Link>
+                  <Link to="/alerts">Alerts</Link>
+                </>
+              )}
+
               <button className="ghost-button" onClick={handleLogout}>
                 Logout
               </button>
@@ -37,7 +49,6 @@ export default function App() {
             <>
               <Link to="/login">Login</Link>
               <Link to="/register">Register</Link>
-              <Link to="/admin">Admin Portal</Link>
             </>
           )}
         </nav>
@@ -45,16 +56,42 @@ export default function App() {
 
       <main className="page-container">
         <Routes>
-          <Route path="/" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
-          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
-          <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/report" element={<ProtectedRoute><ReportIncident /></ProtectedRoute>} />
-          <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+          <Route path="/" element={<Navigate to={user ? getDefaultRoute() : '/login'} replace />} />
+          <Route path="/login" element={user ? <Navigate to={getDefaultRoute()} /> : <Login />} />
+          <Route path="/register" element={user ? <Navigate to={getDefaultRoute()} /> : <Register />} />
           
-          {/* Admin Route directly rendering AdminDashboard */}
-          <Route path="/admin" element={<AdminDashboard />} />
-
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={['citizen', 'admin']}>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/report"
+            element={
+              <ProtectedRoute allowedRoles={['citizen']}>
+                <ReportIncident />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/alerts"
+            element={
+              <ProtectedRoute allowedRoles={['citizen', 'admin']}>
+                <Alerts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
