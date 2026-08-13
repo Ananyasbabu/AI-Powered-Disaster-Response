@@ -27,12 +27,18 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
-  const login = (username, password) => {
+  const login = (username, password, expectedRole = null) => {
     const account = accounts.find(
       (item) => item.username.toLowerCase() === username.toLowerCase() && item.password === password
     );
     if (!account) {
       return { success: false, message: 'Invalid username or password.' };
+    }
+    if (expectedRole && account.role !== expectedRole) {
+      return {
+        success: false,
+        message: `This login page is for ${expectedRole} users only. Use the ${account.role} login page.`,
+      };
     }
     const loggedInUser = {
       username: account.username,
@@ -44,17 +50,18 @@ export function AuthProvider({ children }) {
     return { success: true, user: loggedInUser };
   };
 
-  const register = (name, email, username, password) => {
+  const register = (name, email, username, password, role = 'citizen') => {
     if (accounts.some((item) => item.username.toLowerCase() === username.toLowerCase())) {
       return { success: false, message: 'Username already taken.' };
     }
     if (accounts.some((item) => item.email.toLowerCase() === email.toLowerCase())) {
       return { success: false, message: 'Email already in use.' };
     }
-    const newAccount = { name, email, username, password, role: 'citizen' };
+    const newAccount = { name, email, username, password, role };
     setAccounts((previous) => [...previous, newAccount]);
-    setUser({ username, name, email, role: 'citizen' });
-    return { success: true };
+    const registeredUser = { username, name, email, role };
+    setUser(registeredUser);
+    return { success: true, user: registeredUser };
   };
 
   const logout = () => {
@@ -70,3 +77,4 @@ export function AuthProvider({ children }) {
 }
 
 export { AuthContext };
+

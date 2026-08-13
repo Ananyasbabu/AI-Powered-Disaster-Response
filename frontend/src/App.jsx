@@ -3,6 +3,8 @@ import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthContext } from './context/AuthContext';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminLogin from './pages/AdminLogin';
+import AdminRegister from './pages/AdminRegister';
 import Alerts from './pages/Alerts';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
@@ -49,6 +51,7 @@ export default function App() {
             <>
               <Link to="/login">Login</Link>
               <Link to="/register">Register</Link>
+              <Link to="/admin-login">Admin Login</Link>
             </>
           )}
         </nav>
@@ -58,6 +61,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to={user ? getDefaultRoute() : '/login'} replace />} />
           <Route path="/login" element={user ? <Navigate to={getDefaultRoute()} /> : <Login />} />
+          <Route path="/admin-login" element={user ? <Navigate to={getDefaultRoute()} /> : <AdminLogin />} />
+          <Route path="/admin-register" element={user ? <Navigate to={getDefaultRoute()} /> : <AdminRegister />} />
           <Route path="/register" element={user ? <Navigate to={getDefaultRoute()} /> : <Register />} />
           
           <Route

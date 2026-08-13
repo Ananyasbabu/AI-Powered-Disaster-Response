@@ -2,7 +2,7 @@ import { useContext, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
-export default function Login() {
+export default function AdminLogin() {
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
@@ -11,19 +11,19 @@ export default function Login() {
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    const result = login(username.trim(), password, 'citizen');
+    const result = login(username.trim(), password, 'admin');
     if (!result.success) {
       setError(result.message);
       return;
     }
-    navigate('/dashboard');
+    navigate('/admin');
   };
 
   return (
     <section className="auth-page card">
       <div className="auth-heading">
-        <h1>Citizen Login</h1>
-        <p>Sign in to access the citizen dashboard, report incidents, and receive alerts.</p>
+        <h1>Admin Login</h1>
+        <p>Sign in with administrator credentials to access the control center for incidents, shelters and alerts.</p>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -34,7 +34,7 @@ export default function Login() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="citizen"
+            placeholder="admin"
             required
           />
         </label>
@@ -49,11 +49,14 @@ export default function Login() {
           />
         </label>
         <button type="submit" className="primary-button">
-          Sign in
+          Sign in as admin
         </button>
       </form>
       <p className="page-note">
-        New to DisasterGuard? <Link to="/register">Create an account</Link> or use the <Link to="/admin-login">admin login</Link> if you are an administrator.
+        Not an admin? <Link to="/login">Go to citizen login</Link> instead.
+      </p>
+      <p className="page-note">
+        Don't have an admin account? <Link to="/admin-register">Create one</Link>.
       </p>
     </section>
   );

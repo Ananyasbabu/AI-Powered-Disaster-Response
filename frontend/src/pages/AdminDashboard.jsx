@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import { AuthContext } from '../context/AuthContext';
 
 const API_BASE = 'http://localhost:5000/api/admin';
+const ADMIN_GATE_PASSCODE = 'admin123';
 
 export default function AdminDashboard() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [passcode, setPasscode] = useState('');
-
+  const { user } = useContext(AuthContext);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState({ total_incidents: 0, pending_incidents: 0, verified_incidents: 0, total_shelters: 0 });
   const [incidents, setIncidents] = useState([]);
   const [shelters, setShelters] = useState([]);
+  const [passcode, setPasscode] = useState('');
+  const [isVerified, setIsVerified] = useState(false);
+  const [verificationError, setVerificationError] = useState('');
   
   // New Shelter Form State
   const [newShelter, setNewShelter] = useState({ name: '', lat: '', lng: '', total_capacity: '', contact: '' });
@@ -18,21 +21,11 @@ export default function AdminDashboard() {
   const [alertForm, setAlertForm] = useState({ region: '', severity: 'CRITICAL', message: '' });
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchStats();
-      fetchIncidents();
-      fetchShelters();
-    }
-  }, [isAuthenticated]);
-
-  const handleVerify = (e) => {
-    e.preventDefault();
-    if (passcode === 'admin123') { // Replace with your admin passcode
-      setIsAuthenticated(true);
-    } else {
-      alert('Invalid Passcode!');
-    }
-  };
+    if (!isVerified) return;
+    fetchStats();
+    fetchIncidents();
+    fetchShelters();
+  }, [isVerified]);
 
   const fetchStats = async () => {
     try {
@@ -91,22 +84,33 @@ export default function AdminDashboard() {
     setAlertForm({ region: '', severity: 'CRITICAL', message: '' });
   };
 
-  // Passcode Lock View
-  if (!isAuthenticated) {
+  const handlePasscodeSubmit = (e) => {
+    e.preventDefault();
+    if (passcode === ADMIN_GATE_PASSCODE) {
+      setIsVerified(true);
+      setVerificationError('');
+    } else {
+      setVerificationError('Invalid admin passcode. Please try again.');
+    }
+  };
+
+  if (!isVerified) {
     return (
-      <div style={{ maxWidth: '400px', margin: '80px auto', padding: '30px', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', borderRadius: '8px', backgroundColor: '#fff' }}>
-        <h2>🔒 Admin Access</h2>
-        <p>Please enter the admin passcode to view the control panel.</p>
-        <form onSubmit={handleVerify}>
+      <div style={{ maxWidth: '420px', margin: '80px auto', padding: '32px', textAlign: 'center', boxShadow: '0 6px 18px rgba(0,0,0,0.12)', borderRadius: '10px', backgroundColor: '#ffffff' }}>
+        <h2>🔒 Admin Verification</h2>
+        <p>Enter the admin passcode to unlock the control tower.</p>
+        {verificationError && <div style={{ margin: '16px 0', color: '#b00020' }}>{verificationError}</div>}
+        <form onSubmit={handlePasscodeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <input
             type="password"
-            placeholder="Enter passcode"
             value={passcode}
             onChange={(e) => setPasscode(e.target.value)}
-            style={{ width: '100%', padding: '10px', margin: '15px 0', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
+            placeholder="Admin passcode"
+            style={{ padding: '12px', borderRadius: '6px', border: '1px solid #ccc' }}
+            required
           />
-          <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#007bff', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            Verify Access
+          <button type="submit" style={{ padding: '12px', borderRadius: '6px', backgroundColor: '#007bff', color: '#fff', border: 'none', cursor: 'pointer' }}>
+            Unlock Admin Dashboard
           </button>
         </form>
       </div>
@@ -117,6 +121,7 @@ export default function AdminDashboard() {
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
       <h2>🚨 Admin Control Tower</h2>
+      <p style={{ marginTop: '8px', color: '#333' }}>Welcome back, {user?.name || 'Admin'}.</p>
       
       {/* Navigation Tabs */}
       <div style={{ marginBottom: '20px', display: 'flex', gap: '10px' }}>
