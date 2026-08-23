@@ -1,59 +1,55 @@
-import { useContext, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
+import API from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
 
 export default function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
-    const result = login(username.trim(), password);
-    if (!result.success) {
-      setError(result.message);
-      return;
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await API.post('/auth/login', { email, password });
+
+      if (res.data && res.data.token) {
+        const token = res.data.token;
+        const userData = res.data.user || { email };
+
+        login(userData, token);
+        navigate('/dashboard');
+      }
+    } catch (err) {
+      // Read `error` key from login_user service response
+      const backendError = err.response?.data?.error || err.response?.data?.message;
+      alert(backendError || 'Invalid email or password');
     }
-    navigate('/dashboard');
   };
 
   return (
-    <section className="auth-page card">
-      <div className="auth-heading">
-        <h1>Citizen Login</h1>
-        <p>Access the disaster response dashboard, incident reporting and routes.</p>
-      </div>
-      {error && <div className="alert alert-error">{error}</div>}
-      <form className="form-stack" onSubmit={handleSubmit}>
-        <label>
-          Username
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="citizen"
-            required
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password"
-            required
-          />
-        </label>
-        <button type="submit" className="primary-button">
-          Sign in
-        </button>
+    <div style={{ maxWidth: '400px', margin: '50px auto', padding: '20px' }}>
+      <h2>Login to DisasterGuard</h2>
+      <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <input
+          type="email"
+          placeholder="Enter Email (e.g., anu@gmail.com)"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          style={{ padding: '10px', borderRadius: '4px' }}
+        />
+        <input
+          type="password"
+          placeholder="Enter Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          style={{ padding: '10px', borderRadius: '4px' }}
+        />
+        <button type="submit" style={{ padding: '10px', cursor: 'pointer' }}>Login</button>
       </form>
-      <p className="page-note">
-        New to DisasterGuard? <Link to="/register">Create an account</Link> and start protecting your community.
-      </p>
-    </section>
+    </div>
   );
 }
