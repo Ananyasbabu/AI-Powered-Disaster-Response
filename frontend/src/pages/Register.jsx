@@ -1,10 +1,8 @@
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import API from '../api/axios';
-import { AuthContext } from '../context/AuthContext';
 
 export default function Register() {
-  const { login } = useContext(AuthContext);
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -19,7 +17,7 @@ export default function Register() {
 
     const payload = {
       name: name.trim(),
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password: password,
     };
 
@@ -27,24 +25,20 @@ export default function Register() {
       const response = await API.post('/auth/register', payload);
 
       if (response.status === 201) {
-        const token = response.data?.token;
-        const userData = response.data?.user;
-
-        if (token && login) {
-          login(userData, token);
-        }
-
-        navigate('/dashboard');
+        // Redirect to Login page and pass success message state
+        navigate('/login', {
+          state: { message: 'Account created successfully! Please sign in.' }
+        });
       }
     } catch (err) {
       const status = err.response?.status;
-      const backendError = err.response?.data?.error;
+      const backendError = err.response?.data?.error || err.response?.data?.message;
 
       if (status === 409) {
         setIsDuplicate(true);
         setError(backendError || 'An account with that email already exists.');
       } else {
-        setError(backendError || 'Registration failed. Please try again.');
+        setError(backendError || 'Registration failed. Please check your details.');
       }
 
       console.error('Registration Error:', backendError || err.message);
@@ -52,7 +46,7 @@ export default function Register() {
   };
 
   return (
-    <section className="auth-page card">
+    <section className="auth-page card" style={{ maxWidth: '400px', margin: '50px auto', padding: '24px' }}>
       <div className="auth-heading">
         <h1>Create Citizen Account</h1>
         <p>Register to report incidents, see flood risk, navigate shelters and get alerts.</p>
@@ -71,7 +65,7 @@ export default function Register() {
         </div>
       )}
 
-      <form className="form-stack" onSubmit={handleSubmit}>
+      <form className="form-stack" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
         <label>
           Full Name
           <input
@@ -80,6 +74,7 @@ export default function Register() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Your full name"
             required
+            style={{ width: '100%', padding: '10px', marginTop: '5px' }}
           />
         </label>
 
@@ -91,6 +86,7 @@ export default function Register() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
             required
+            style={{ width: '100%', padding: '10px', marginTop: '5px' }}
           />
         </label>
 
@@ -102,15 +98,16 @@ export default function Register() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password123 (8+ chars, 1 uppercase, 1 digit)"
             required
+            style={{ width: '100%', padding: '10px', marginTop: '5px' }}
           />
         </label>
 
-        <button type="submit" className="primary-button">
+        <button type="submit" className="primary-button" style={{ padding: '12px', cursor: 'pointer' }}>
           Register
         </button>
       </form>
 
-      <p className="page-note">
+      <p className="page-note" style={{ marginTop: '15px' }}>
         Already have an account? <Link to="/login">Sign in</Link> instead.
       </p>
     </section>
