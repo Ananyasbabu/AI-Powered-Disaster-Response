@@ -40,6 +40,7 @@ def create_app() -> Flask:
     # Register blueprints
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp)
+   
 
     # Register Member 2 & Admin Blueprints using PyMongo instance
     # mongo.db passes the connected MongoDB database directly

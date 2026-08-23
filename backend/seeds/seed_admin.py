@@ -26,6 +26,17 @@ except ImportError:
     print("ERROR: flask-bcrypt is not installed. Run: pip install flask-bcrypt")
     sys.exit(1)
 
+from werkzeug.security import generate_password_hash
+
+# ...
+admin_data = {
+    "name": "Admin",
+    "email": "admin@disaster.com",
+    "password": generate_password_hash("AdminPassword123!"),  # <--- Ensure password is hashed
+    "role": "admin",  # <--- Ensure role is explicitly 'admin'
+    "is_admin": True
+}
+
 
 def seed_admin():
     admin_name = os.getenv("ADMIN_NAME", "Admin").strip()

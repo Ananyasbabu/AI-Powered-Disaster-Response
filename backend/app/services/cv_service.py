@@ -11,12 +11,86 @@ TARGET_CLASSES = ['flooded_road', 'waterlogging', 'fallen_tree', 'flood', 'fire'
 def verify_incident_image(image_path, confidence_threshold=0.25):
     try:
         results = cv_model(image_path, conf=confidence_threshold)
-        if not results:
+        
+        if not results or len(results) == 0:
+            return {
+                "status": "pending_review",
+                "confidence_score": 0.0,
+                "detected_labels": []
+            }
+        
+        result = results[0]
+        detected_labels = []
+        confidences = []
+        
+        if hasattr(result, 'boxes') and result.boxes:
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = cv_model.names[cls_id]
+                detected_labels.append(label)
+                confidences.append(conf)
+
+        is_verified = len(detected_labels) > 0
+        max_conf = max(confidences) if confidences else 0.0
+
+        return {
+            "status": "verified" if is_verified else "pending_review",
+            "confidence_score": max_conf,
+            "detected_labels": detected_labels
+        }
+    except Exception as e:
+        return {
+            "status": "pending_review",
+            "confidence_score": 0.0,
+            "detected_labels": [],
+            "error": str(e)
+        }
+    try:
+        results = cv_model(image_path, conf=confidence_threshold)
+        
+        if not results or len(results) == 0:
+            return {
+                "status": "UNVERIFIED",
+                "verified": False,
+                "confidence": 0.0,
+                "detections": []
+            }
+        
+        result = results[0]
+        detections = []
+        
+        if hasattr(result, 'boxes') and result.boxes:
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = cv_model.names[cls_id]
+                detections.append({"label": label, "confidence": conf})
+
+        is_verified = len(detections) > 0
+        return {
+            "status": "VERIFIED" if is_verified else "PENDING",
+            "verified": is_verified,
+            "confidence": max([d["confidence"] for d in detections], default=0.0),
+            "detections": detections
+        }
+    except Exception as e:
+        return {
+            "status": "PENDING",
+            "verified": False,
+            "confidence": 0.0,
+            "detections": [],
+            "error": str(e)
+        }
+    try:
+        results = cv_model(image_path, conf=confidence_threshold)
+        
+        if not results or len(results) == 0:
             return {"verified": False, "confidence": 0.0, "detections": []}
         
         result = results[0]
-        # Rest of your detection parsing logic...
         detections = []
+        
         if hasattr(result, 'boxes') and result.boxes:
             for box in result.boxes:
                 cls_id = int(box.cls[0])
@@ -30,29 +104,28 @@ def verify_incident_image(image_path, confidence_threshold=0.25):
             "detections": detections
         }
     except Exception as e:
-        # Fallback for non-image / corrupted files
         return {"verified": False, "confidence": 0.0, "detections": [], "error": str(e)}
-    """Runs YOLOv8 object detection on uploaded incident images."""
-    results = cv_model(image_path, conf=confidence_threshold)[0]
-    
-    detected_labels = []
-    max_confidence = 0.0
-    is_verified = False
+    try:
+        results = cv_model(image_path, conf=confidence_threshold)
+        
+        # Guard against empty prediction results
+        if not results or len(results) == 0:
+            return {"verified": False, "confidence": 0.0, "detections": []}
+        
+        result = results[0]
+        detections = []
+        
+        if hasattr(result, 'boxes') and result.boxes:
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = cv_model.names[cls_id]
+                detections.append({"label": label, "confidence": conf})
 
-    for box in results.boxes:
-        class_id = int(box.cls[0])
-        label = cv_model.names[class_id]
-        conf = float(box.conf[0])
-
-        detected_labels.append(label)
-        if conf > max_confidence:
-            max_confidence = conf
-
-        if label.lower() in TARGET_CLASSES or conf >= 0.50:
-            is_verified = True
-
-    return {
-        "status": "verified" if is_verified else "rejected",
-        "confidence_score": round(max_confidence, 3),
-        "detected_labels": detected_labels
-    }
+        return {
+            "verified": len(detections) > 0,
+            "confidence": max([d["confidence"] for d in detections], default=0.0),
+            "detections": detections
+        }
+    except Exception as e:
+        return {"verified": False, "confidence": 0.0, "detections": [], "error": str(e)}

@@ -58,10 +58,13 @@ def init_incident_routes(db):
 
     @incident_bp.route('/api/incidents/verified', methods=['GET'])
     def get_verified_incidents():
-        incidents = list(db.incidents.find(
-            {"cv_verification.status": "verified"},
-            {"_id": 1, "type": 1, "image_url": 1, "location": 1, "created_at": 1}
-        ))
+        incidents = list(db.incidents.find({
+            "$or": [
+                {"status": "VERIFIED"},
+                {"status": "verified"},
+                {"cv_verification.status": "verified"}
+            ]
+        }))
         for inc in incidents:
             inc['_id'] = str(inc['_id'])
         return jsonify({"status": "success", "data": incidents}), 200
