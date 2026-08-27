@@ -4,18 +4,19 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 from app.services.cv_service import verify_incident_image
 
-incident_bp = Blueprint('incident_bp', __name__)
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def init_incident_routes(db):
-    @incident_bp.route('/api/incidents/report', methods=['POST'])
+    incident_bp = Blueprint('incident_bp', __name__)
+
+    @incident_bp.route('/incidents/report', methods=['POST'])
     def report_incident():
         if 'image' not in request.files:
             return jsonify({"status": "error", "message": "No image uploaded"}), 400
 
         file = request.files['image']
-        incident_type = request.form.get('type')
+        incident_type = request.form.get('type', 'Flood')
         latitude = request.form.get('latitude')
         longitude = request.form.get('longitude')
         reporter_id = request.form.get('reporter_id', 'anonymous')
@@ -27,7 +28,7 @@ def init_incident_routes(db):
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
 
-        # Execute CV Pipeline
+        # Execute non-blocking CV Pipeline
         cv_result = verify_incident_image(filepath)
 
         incident_doc = {
@@ -39,11 +40,11 @@ def init_incident_routes(db):
                 "coordinates": [float(longitude), float(latitude)]
             },
             "cv_verification": {
-                "status": cv_result["status"],
-                "confidence_score": cv_result["confidence_score"],
-                "detected_labels": cv_result["detected_labels"]
+                "status": cv_result.get("status", "pending"),
+                "confidence_score": cv_result.get("confidence_score", 0.0),
+                "detected_labels": cv_result.get("detected_labels", [])
             },
-            "status": "active" if cv_result["status"] == "verified" else "pending_review",
+            "status": "verified" if cv_result.get("status") == "verified" else "pending_review",
             "created_at": datetime.utcnow()
         }
 
@@ -56,11 +57,10 @@ def init_incident_routes(db):
             "verification": cv_result
         }), 201
 
-    @incident_bp.route('/api/incidents/verified', methods=['GET'])
+    @incident_bp.route('/incidents/verified', methods=['GET'])
     def get_verified_incidents():
         incidents = list(db.incidents.find({
             "$or": [
-                {"status": "VERIFIED"},
                 {"status": "verified"},
                 {"cv_verification.status": "verified"}
             ]
