@@ -1,46 +1,28 @@
 import os
 from flask import Flask
 from flask_cors import CORS
-from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# Import route initializers
-from routes.admin_routes import init_admin_routes
-from routes.incident_routes import init_incident_routes  # Member 2 routes
+from app.extensions import bcrypt
+from app.routes.auth import auth_bp
+from app.routes.admin_routes import admin_bp
+from app.routes.incident_routes import incident_bp
 
-# Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 
-# Serve static files/uploaded image evidence
+# Initialize bcrypt with app instance
+bcrypt.init_app(app)
+
 app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MONGO_URI'] = os.getenv("MONGO_URI")
 
-# MongoDB Atlas Cloud Connection
-MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    raise ValueError("MONGO_URI is missing from your .env file!")
-
-client = MongoClient(MONGO_URI)
-
-# Connect to database
-db = client["disaster_db"]
-
-# Test connection on startup
-try:
-    client.admin.command('ping')
-    print("✅ Connected successfully to MongoDB Atlas Cloud!")
-except Exception as e:
-    print("❌ Failed to connect to MongoDB Atlas:", e)
-
-# Register Admin Routes Blueprint
-admin_blueprint = init_admin_routes(db)
-app.register_blueprint(admin_blueprint)
-
-# Register Member 2 Incident Routes Blueprint
-incident_blueprint = init_incident_routes(db)
-app.register_blueprint(incident_blueprint)
+# Register Blueprints directly
+app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
+app.register_blueprint(incident_bp)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

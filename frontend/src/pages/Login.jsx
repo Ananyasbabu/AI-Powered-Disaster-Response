@@ -2,7 +2,6 @@ import React, { useState, useContext } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
-
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,41 +13,35 @@ export default function Login() {
   const successMessage = location.state?.message;
 
   const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
+  e.preventDefault();
+  setError('');
 
-    try {
-      const res = await API.post('/auth/login', {
-        email: email.trim().toLowerCase(),
-        password: password,
-      });
+  try {
+    const res = await API.post('/auth/login', { email, password });
 
-      if (res.status === 200 && res.data?.token) {
-        const token = res.data.token;
-        const userData = res.data.user || {};
+    if (res.status === 200 && res.data?.token) {
+      const token = res.data.token;
+      const userData = res.data.user || {};
 
-        // Call context login safely
-        if (login) {
-          login(userData, token);
-        } else {
-          localStorage.setItem('token', token);
-          localStorage.setItem('user', JSON.stringify(userData));
-        }
-
-        // Navigate to dashboard
-        navigate('/dashboard');
-      }
-    } catch (err) {
-      console.error('Caught error:', err);
       
-      // If it's a network/backend error, show message; otherwise show JS error
-      if (err.response) {
-        setError(err.response.data?.error || err.response.data?.message || 'Invalid email or password');
+      if (login) {
+        login(userData, token);
       } else {
-        setError(err.message || 'An error occurred during login');
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(userData));
       }
+
+      navigate('/dashboard');
     }
-  };
+  } catch (err) {
+    console.error('Caught error:', err);
+    if (err.response) {
+      setError(err.response.data?.error || err.response.data?.message || 'Invalid email or password');
+    } else {
+      setError(err.message || 'An error occurred during login');
+    }
+  }
+};
 
   return (
     <section className="auth-page card" style={{ maxWidth: '400px', margin: '50px auto', padding: '24px' }}>
