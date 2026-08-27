@@ -3,7 +3,14 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import API from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
 export default function Login() {
+<<<<<<< HEAD
   const [email, setEmail] = useState('');
+=======
+  const { login } = useContext(AuthContext);
+  const navigate = useNavigate();
+  const [role, setRole] = useState('citizen');
+  const [username, setUsername] = useState('');
+>>>>>>> upstream/main
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const { login } = useContext(AuthContext);
@@ -33,6 +40,7 @@ export default function Login() {
 
       navigate('/dashboard');
     }
+<<<<<<< HEAD
   } catch (err) {
     console.error('Caught error:', err);
     if (err.response) {
@@ -42,10 +50,22 @@ export default function Login() {
     }
   }
 };
+=======
+    if (result.user?.role !== role) {
+      setError(
+        `You selected ${role} login, but the provided credentials belong to a ${result.user?.role} account.`
+      );
+      return;
+    }
+    const destination = result.user.role === 'admin' ? '/admin' : '/dashboard';
+    navigate(destination);
+  };
+>>>>>>> upstream/main
 
   return (
     <section className="auth-page card" style={{ maxWidth: '400px', margin: '50px auto', padding: '24px' }}>
       <div className="auth-heading">
+<<<<<<< HEAD
         <h2>Login to DisasterGuard</h2>
       </div>
 
@@ -62,13 +82,55 @@ export default function Login() {
       )}
 
       <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+=======
+        <h1>{role === 'admin' ? 'Admin Login' : 'Citizen Login'}</h1>
+        <p>
+          {role === 'admin'
+            ? 'Sign in here to manage incidents, shelters, and emergency alerts.'
+            : 'Sign in here to access the citizen dashboard, map, reporting and alerts.'}
+        </p>
+      </div>
+
+      <div className="auth-toggle">
+        <button
+          type="button"
+          className={role === 'citizen' ? 'toggle-button active' : 'toggle-button'}
+          onClick={() => {
+            setRole('citizen');
+            setError('');
+          }}
+        >
+          Citizen
+        </button>
+        <button
+          type="button"
+          className={role === 'admin' ? 'toggle-button active' : 'toggle-button'}
+          onClick={() => {
+            setRole('admin');
+            setError('');
+          }}
+        >
+          Admin
+        </button>
+      </div>
+
+      {error && <div className="alert alert-error">{error}</div>}
+      <form className="form-stack" onSubmit={handleSubmit}>
+>>>>>>> upstream/main
         <label>
           Email Address
           <input
+<<<<<<< HEAD
             type="email"
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+=======
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder={role === 'admin' ? 'admin' : 'citizen'}
+>>>>>>> upstream/main
             required
             style={{ width: '100%', padding: '10px', marginTop: '5px' }}
           />
