@@ -1,15 +1,12 @@
-import React, { useState, useContext } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import API from '../api/axios';
+import { useContext, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 export default function Login() {
-<<<<<<< HEAD
-  const [email, setEmail] = useState('');
-=======
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
+  const [role, setRole] = useState('citizen');
   const [username, setUsername] = useState('');
->>>>>>> upstream/main
+
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
@@ -29,7 +26,6 @@ export default function Login() {
     const destination = result.user.role === 'admin' ? '/admin' : '/dashboard';
     navigate(destination);
   };
->>>>>>> upstream/main
 
   return (
     <section className="auth-page card" style={{ maxWidth: '400px', margin: '50px auto', padding: '24px' }}>
@@ -67,16 +63,9 @@ export default function Login() {
 
       {error && <div className="alert alert-error">{error}</div>}
       <form className="form-stack" onSubmit={handleSubmit}>
->>>>>>> upstream/main
         <label>
-          Email Address
+          Username
           <input
-<<<<<<< HEAD
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-=======
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}

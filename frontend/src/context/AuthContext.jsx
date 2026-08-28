@@ -1,8 +1,12 @@
-import React, { createContext, useState } from 'react';
+import { createContext, useState } from 'react';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
+  const [accounts, setAccounts] = useState(() => {
+    const savedAccounts = localStorage.getItem('accounts');
+    return savedAccounts ? JSON.parse(savedAccounts) : [];
+  });
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
@@ -46,7 +50,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+  const value = { user, token, login, register, logout };
 
-export { AuthContext };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
