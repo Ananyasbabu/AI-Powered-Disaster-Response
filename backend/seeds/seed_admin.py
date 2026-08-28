@@ -3,27 +3,20 @@ Admin seed script.
 
 Usage (from the backend/ directory):
     python seeds/seed_admin.py
-
-Reads credentials from environment variables (or a .env file in backend/):
-    ADMIN_NAME      — display name (default: "Admin")
-    ADMIN_EMAIL     — email address (required)
-    ADMIN_PASSWORD  — password (required)
-    MONGO_URI       — MongoDB connection URI
-    MONGO_DB_NAME   — database name
-
-This is the ONLY supported mechanism for creating an admin account.
-Citizens cannot self-register as admins via the public API.
 """
 import os
 import sys
+from datetime import datetime, timezone
 
 # Allow imports from the backend/ root when run as a standalone script
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
-load_dotenv()
 
-from datetime import datetime, timezone
+# Explicitly load .env from the backend root folder
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(dotenv_path=env_path)
+
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
@@ -33,13 +26,28 @@ except ImportError:
     print("ERROR: flask-bcrypt is not installed. Run: pip install flask-bcrypt")
     sys.exit(1)
 
+from werkzeug.security import generate_password_hash
+
+# ...
+admin_data = {
+    "name": "Admin",
+    "email": "admin@disaster.com",
+    "password": generate_password_hash("AdminPassword123!"),  # <--- Ensure password is hashed
+    "role": "admin",  # <--- Ensure role is explicitly 'admin'
+    "is_admin": True
+}
+
 
 def seed_admin():
     admin_name = os.getenv("ADMIN_NAME", "Admin").strip()
     admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
     admin_password = (os.getenv("ADMIN_PASSWORD") or "").strip()
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    db_name = os.getenv("MONGO_DB_NAME", "disaster_response")
+    mongo_uri = os.getenv("MONGO_URI")
+    db_name = os.getenv("MONGO_DB_NAME", "disaster_db")
+
+    if not mongo_uri:
+        print("ERROR: MONGO_URI is missing from your .env file!")
+        sys.exit(1)
 
     if not admin_email or not admin_password:
         print(
@@ -76,12 +84,12 @@ def seed_admin():
 
     try:
         result = users_col.insert_one(doc)
-        print("Admin account created successfully.")
-        print(f"  Name  : {doc['name']}")
-        print(f"  Email : {doc['email']}")
-        print(f"  ID    : {result.inserted_id}")
+        print("✅ Admin account created successfully.")
+        print(f"   Name  : {doc['name']}")
+        print(f"   Email : {doc['email']}")
+        print(f"   ID    : {result.inserted_id}")
     except DuplicateKeyError:
-        print(f"Admin account already exists for: {admin_email}")
+        print(f"ℹ️ Admin account already exists for: {admin_email}")
     finally:
         client.close()
 
