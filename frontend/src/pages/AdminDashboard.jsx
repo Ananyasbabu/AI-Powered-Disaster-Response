@@ -1,8 +1,6 @@
-import { useContext, useEffect, useState } from 'react';
-import { AuthContext } from '../context/AuthContext';
+import React, { useState, useEffect } from 'react';
 
 const API_BASE = 'http://localhost:5000/api/admin';
-const ADMIN_GATE_PASSCODE = 'admin123';
 
 export default function AdminDashboard() {
   const { user } = useContext(AuthContext);
@@ -21,67 +19,79 @@ export default function AdminDashboard() {
   const [alertForm, setAlertForm] = useState({ region: '', severity: 'CRITICAL', message: '' });
 
   useEffect(() => {
-    if (!isVerified) return;
-    fetchStats();
-    fetchIncidents();
-    fetchShelters();
-  }, [isVerified]);
+    if (isAuthenticated) {
+      fetchStats();
+      fetchIncidents();
+      fetchShelters();
+    }
+  }, [isAuthenticated]);
+
+  const handleVerify = (e) => {
+    e.preventDefault();
+    if (passcode === 'admin123') { // Replace with your admin passcode
+      setIsAuthenticated(true);
+    } else {
+      alert('Invalid Passcode!');
+    }
+  };
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_BASE}/stats`);
-      const data = await res.json();
-      setStats(data);
-    } catch (err) { console.error(err); }
+      const res = await API.get('/admin/stats');
+      setStats(res.data);
+    } catch (err) { console.error('Error fetching stats:', err); }
   };
 
   const fetchIncidents = async () => {
     try {
-      const res = await fetch(`${API_BASE}/incidents`);
-      const data = await res.json();
-      setIncidents(data);
-    } catch (err) { console.error(err); }
+      const res = await API.get('/admin/incidents');
+      setIncidents(res.data);
+    } catch (err) { console.error('Error fetching incidents:', err); }
   };
 
   const fetchShelters = async () => {
     try {
-      const res = await fetch(`${API_BASE}/shelters`);
-      const data = await res.json();
-      setShelters(data);
-    } catch (err) { console.error(err); }
+      const res = await API.get('/admin/shelters');
+      setShelters(res.data);
+    } catch (err) { console.error('Error fetching shelters:', err); }
   };
 
   const handleVerifyIncident = async (id, status) => {
-    await fetch(`${API_BASE}/incidents/${id}/verify`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    });
-    fetchIncidents();
-    fetchStats();
+    try {
+      await API.patch(`/admin/incidents/${id}/verify`, { status });
+      fetchIncidents();
+      fetchStats();
+    } catch (err) {
+      console.error('Error updating status:', err);
+    }
   };
 
   const handleAddShelter = async (e) => {
     e.preventDefault();
-    await fetch(`${API_BASE}/shelters`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newShelter)
-    });
-    setNewShelter({ name: '', lat: '', lng: '', total_capacity: '', contact: '' });
-    fetchShelters();
-    fetchStats();
+    try {
+      await API.post('/admin/shelters', {
+        ...newShelter,
+        lat: parseFloat(newShelter.lat),
+        lng: parseFloat(newShelter.lng),
+        total_capacity: parseInt(newShelter.total_capacity)
+      });
+      setNewShelter({ name: '', lat: '', lng: '', total_capacity: '', contact: '' });
+      fetchShelters();
+      fetchStats();
+    } catch (err) {
+      console.error('Error adding shelter:', err);
+    }
   };
 
   const handleSendAlert = async (e) => {
     e.preventDefault();
-    await fetch(`${API_BASE}/alerts/broadcast`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(alertForm)
-    });
-    alert('Emergency alert broadcasted!');
-    setAlertForm({ region: '', severity: 'CRITICAL', message: '' });
+    try {
+      await API.post('/admin/alerts/broadcast', alertForm);
+      alert('Emergency alert broadcasted!');
+      setAlertForm({ region: '', severity: 'CRITICAL', message: '' });
+    } catch (err) {
+      console.error('Error broadcasting alert:', err);
+    }
   };
 
   const handlePasscodeSubmit = (e) => {
@@ -154,7 +164,7 @@ export default function AdminDashboard() {
             <thead>
               <tr>
                 <th>Image</th>
-                <th>Location</th>
+                <th>Location (Lat, Lng)</th>
                 <th>AI Detection</th>
                 <th>AI Confidence Score</th>
                 <th>Status</th>
@@ -162,33 +172,41 @@ export default function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              {incidents.map((inc) => (
-                <tr key={inc._id}>
-                  <td>
-                    {inc.image_url ? (
-                      <img src={inc.image_url} alt="Incident" width="80" height="60" />
-                    ) : 'No Image'}
-                  </td>
-                  <td>{inc.location?.lat}, {inc.location?.lng}</td>
-                  <td>{inc.cv_verification?.detected_disaster || 'N/A'}</td>
-                  <td>
-                    <strong>
-                      {inc.cv_verification?.confidence_score 
-                        ? `${(inc.cv_verification.confidence_score * 100).toFixed(1)}%` 
-                        : 'N/A'}
-                    </strong>
-                  </td>
-                  <td>{inc.status}</td>
-                  <td>
-                    {inc.status === 'PENDING' && (
-                      <>
-                        <button onClick={() => handleVerifyIncident(inc._id, 'VERIFIED')} style={{ backgroundColor: 'green', color: 'white', marginRight: '5px' }}>Approve</button>
-                        <button onClick={() => handleVerifyIncident(inc._id, 'REJECTED')} style={{ backgroundColor: 'red', color: 'white' }}>Reject</button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {incidents.map((inc) => {
+                // Parse coordinates from GeoJSON [lng, lat] format
+                const coords = inc.location?.coordinates || [];
+                const lat = coords[1] !== undefined ? coords[1] : inc.location?.lat || 'N/A';
+                const lng = coords[0] !== undefined ? coords[0] : inc.location?.lng || 'N/A';
+                const imgUrl = inc.image_url ? `http://127.0.0.1:5000/${inc.image_url}` : null;
+
+                return (
+                  <tr key={inc._id}>
+                    <td>
+                      {imgUrl ? (
+                        <img src={imgUrl} alt="Incident" width="80" height="60" style={{ objectFit: 'cover' }} />
+                      ) : 'No Image'}
+                    </td>
+                    <td>{lat}, {lng}</td>
+                    <td>{inc.cv_verification?.detected_labels?.join(', ') || inc.cv_verification?.detected_disaster || 'N/A'}</td>
+                    <td>
+                      <strong>
+                        {inc.cv_verification?.confidence_score !== undefined 
+                          ? `${(inc.cv_verification.confidence_score * 100).toFixed(1)}%` 
+                          : 'N/A'}
+                      </strong>
+                    </td>
+                    <td>{inc.status}</td>
+                    <td>
+                      {(inc.status === 'PENDING' || inc.status === 'pending_review') && (
+                        <>
+                          <button onClick={() => handleVerifyIncident(inc._id, 'VERIFIED')} style={{ backgroundColor: 'green', color: 'white', marginRight: '5px', padding: '5px 10px', cursor: 'pointer' }}>Approve</button>
+                          <button onClick={() => handleVerifyIncident(inc._id, 'REJECTED')} style={{ backgroundColor: 'red', color: 'white', padding: '5px 10px', cursor: 'pointer' }}>Reject</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -221,14 +239,14 @@ export default function AdminDashboard() {
         <div>
           <h3>Broadcast Emergency Alert</h3>
           <form onSubmit={handleSendAlert} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '400px' }}>
-            <input placeholder="Target Region (e.g., District 4 / Mysore)" value={alertForm.region} onChange={e => setAlertForm({...alertForm, region: e.target.value})} required />
+            <input placeholder="Target Region (e.g., Mysuru)" value={alertForm.region} onChange={e => setAlertForm({...alertForm, region: e.target.value})} required />
             <select value={alertForm.severity} onChange={e => setAlertForm({...alertForm, severity: e.target.value})}>
               <option value="CRITICAL">Critical</option>
               <option value="HIGH">High Risk</option>
               <option value="MODERATE">Moderate Risk</option>
             </select>
             <textarea placeholder="Alert Message for Citizens" value={alertForm.message} onChange={e => setAlertForm({...alertForm, message: e.target.value})} required />
-            <button type="submit" style={{ backgroundColor: 'red', color: 'white', padding: '10px' }}>Broadcast Alert</button>
+            <button type="submit" style={{ backgroundColor: 'red', color: 'white', padding: '10px', cursor: 'pointer' }}>Broadcast Alert</button>
           </form>
         </div>
       )}

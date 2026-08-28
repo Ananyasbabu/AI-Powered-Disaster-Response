@@ -1,8 +1,8 @@
 """Flask extension instances (initialised in the app factory)."""
 import threading
-
 from flask_bcrypt import Bcrypt
 from pymongo import MongoClient
+import os
 
 bcrypt = Bcrypt()
 
@@ -10,6 +10,12 @@ bcrypt = Bcrypt()
 _client = None
 _db = None
 _lock = threading.Lock()
+
+class MongoDB:
+    def __init__(self):
+        self.db = None
+
+mongo = MongoDB()
 
 
 def init_mongo(app):
@@ -19,6 +25,14 @@ def init_mongo(app):
         if _client is None:
             _client = MongoClient(app.config["MONGO_URI"])
             _db = _client[app.config["MONGO_DB_NAME"]]
+            mongo.db = _db  # Attach database instance to the global mongo object
+            
+            # Test connection
+            try:
+                _client.admin.command('ping')
+                print(" Connected successfully to MongoDB Atlas Cloud!")
+            except Exception as e:
+                print(" Failed to connect to MongoDB Atlas:", e)
 
 
 def get_db():
