@@ -1,46 +1,59 @@
 import { createContext, useState } from 'react';
+import API from '../api/axios';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [accounts, setAccounts] = useState(() => {
-    const savedAccounts = localStorage.getItem('accounts');
-    return savedAccounts ? JSON.parse(savedAccounts) : [];
-  });
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
   const [token, setToken] = useState(() => localStorage.getItem('token') || null);
 
-  const login = (username, password) => {
-    const account = accounts.find(
-      (item) => item.username.toLowerCase() === username.toLowerCase() && item.password === password
-    );
-    if (!account) {
-      return { success: false, message: 'Invalid username or password.' };
+  const login = async (email, password) => {
+    try {
+      const response = await API.post('/auth/login', { email: email.trim().toLowerCase(), password });
+      const loggedInUser = response.data.user;
+      setUser(loggedInUser);
+      setToken(response.data.token);
+      localStorage.setItem('user', JSON.stringify(loggedInUser));
+      localStorage.setItem('token', response.data.token);
+      return { success: true, user: loggedInUser };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Unable to connect to the server.',
+      };
     }
-    const loggedInUser = {
-      username: account.username,
-      name: account.name,
-      email: account.email,
-      role: account.role || 'citizen',
-    };
-    setUser(loggedInUser);
-    return { success: true, user: loggedInUser };
   };
 
-  const register = (name, email, username, password) => {
-    if (accounts.some((item) => item.username.toLowerCase() === username.toLowerCase())) {
-      return { success: false, message: 'Username already taken.' };
+  const adminLogin = async (username, password) => {
+    try {
+      const response = await API.post('/admin/login', { username: username.trim(), password });
+      const loggedInUser = { username, role: response.data.role || 'admin' };
+      setUser(loggedInUser);
+      setToken(response.data.token);
+      localStorage.setItem('user', JSON.stringify(loggedInUser));
+      localStorage.setItem('token', response.data.token);
+      return { success: true, user: loggedInUser };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Unable to connect to the server.',
+      };
     }
-    if (accounts.some((item) => item.email.toLowerCase() === email.toLowerCase())) {
-      return { success: false, message: 'Email already in use.' };
+  };
+
+  const register = async (name, email, password) => {
+    try {
+      await API.post('/auth/register', { name, email, password });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.error || error.response?.data?.message || 'Registration failed.',
+      };
     }
-    const newAccount = { name, email, username, password, role: 'citizen' };
-    setAccounts((previous) => [...previous, newAccount]);
-    setUser({ username, name, email, role: 'citizen' });
-    return { success: true };
   };
 
   const logout = () => {
@@ -50,7 +63,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
   };
 
-  const value = { user, token, login, register, logout };
+  const value = { user, token, login, adminLogin, register, logout };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

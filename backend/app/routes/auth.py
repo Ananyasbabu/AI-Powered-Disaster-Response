@@ -7,7 +7,7 @@ from app.utils.auth import token_required
 auth_bp = Blueprint("auth", __name__)
 
 
-@auth_bp.route("/api/auth/register", methods=["POST"])
+@auth_bp.route("/auth/register", methods=["POST"])
 def register():
     """Register a new citizen account."""
     data = request.get_json(silent=True) or {}
@@ -15,7 +15,7 @@ def register():
     return jsonify(response), status
 
 
-@auth_bp.route("/api/auth/login", methods=["POST"])
+@auth_bp.route("/auth/login", methods=["POST"])
 def login():
     """Log in with email and password; receive a JWT."""
     data = request.get_json(silent=True) or {}
@@ -23,7 +23,7 @@ def login():
     return jsonify(response), status
 
 
-@auth_bp.route("/api/auth/me", methods=["GET"])
+@auth_bp.route("/auth/me", methods=["GET"])
 @token_required
 def me():
     """Return the currently authenticated user's profile."""

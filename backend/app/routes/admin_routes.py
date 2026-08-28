@@ -7,7 +7,7 @@ admin_bp = Blueprint('admin', __name__)
 def init_admin_routes(db):
 
     # 1. Admin Login
-    @admin_bp.route('/api/admin/login', methods=['POST'])
+    @admin_bp.route('/admin/login', methods=['POST'])
     def admin_login():
         data = request.get_json()
         username = data.get('username')
@@ -19,7 +19,7 @@ def init_admin_routes(db):
         return jsonify({"status": "error", "message": "Invalid admin credentials"}), 401
 
     # 2. Live Dashboard Stats
-    @admin_bp.route('/api/admin/stats', methods=['GET'])
+    @admin_bp.route('/admin/stats', methods=['GET'])
     def get_dashboard_stats():
         total_incidents = db.incidents.count_documents({})
         pending_incidents = db.incidents.count_documents({"status": "PENDING"})
@@ -34,7 +34,7 @@ def init_admin_routes(db):
         }), 200
 
     # 3. Incident Management
-    @admin_bp.route('/api/admin/incidents', methods=['GET'])
+    @admin_bp.route('/admin/incidents', methods=['GET'])
     def get_all_incidents():
         status_filter = request.args.get('status')
         query = {}
@@ -46,7 +46,7 @@ def init_admin_routes(db):
             item['_id'] = str(item['_id'])
         return jsonify(incidents), 200
 
-    @admin_bp.route('/api/admin/incidents/<incident_id>/verify', methods=['PATCH'])
+    @admin_bp.route('/admin/incidents/<incident_id>/verify', methods=['PATCH'])
     def verify_incident(incident_id):
         data = request.get_json()
         new_status = data.get('status') # 'VERIFIED' or 'REJECTED'
@@ -65,14 +65,14 @@ def init_admin_routes(db):
         return jsonify({"message": f"Incident updated to {new_status}"}), 200
 
     # 4. Shelter Management (CRUD)
-    @admin_bp.route('/api/admin/shelters', methods=['GET'])
+    @admin_bp.route('/admin/shelters', methods=['GET'])
     def get_shelters():
         shelters = list(db.shelters.find({}))
         for s in shelters:
             s['_id'] = str(s['_id'])
         return jsonify(shelters), 200
 
-    @admin_bp.route('/api/admin/shelters', methods=['POST'])
+    @admin_bp.route('/admin/shelters', methods=['POST'])
     def add_shelter():
         data = request.get_json()
         new_shelter = {
@@ -89,13 +89,13 @@ def init_admin_routes(db):
         res = db.shelters.insert_one(new_shelter)
         return jsonify({"message": "Shelter added", "id": str(res.inserted_id)}), 201
 
-    @admin_bp.route('/api/admin/shelters/<shelter_id>', methods=['DELETE'])
+    @admin_bp.route('/admin/shelters/<shelter_id>', methods=['DELETE'])
     def delete_shelter(shelter_id):
         db.shelters.delete_one({"_id": ObjectId(shelter_id)})
         return jsonify({"message": "Shelter deleted"}), 200
 
     # 5. Emergency Alerts Broadcasting
-    @admin_bp.route('/api/admin/alerts/broadcast', methods=['POST'])
+    @admin_bp.route('/admin/alerts/broadcast', methods=['POST'])
     def broadcast_alert():
         data = request.get_json()
         alert = {

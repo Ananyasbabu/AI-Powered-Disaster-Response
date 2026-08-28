@@ -44,7 +44,7 @@ def create_app() -> Flask:
 
     # Register standard blueprints
     app.register_blueprint(health_bp)
-    app.register_blueprint(auth_bp)
+    app.register_blueprint(auth_bp, url_prefix='/api')
 
     # Register Member 2 & Admin Blueprints with /api prefix
     incident_bp = init_incident_routes(mongo.db)

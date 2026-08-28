@@ -9,6 +9,7 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -21,7 +22,13 @@ export default function Register() {
       password: password,
     };
 
+    if (payload.password.length < 8 || !/[A-Z]/.test(payload.password) || !/[0-9]/.test(payload.password)) {
+      setError('Password must be at least 8 characters and include one uppercase letter and one digit.');
+      return;
+    }
+
     try {
+      setIsSubmitting(true);
       const response = await API.post('/auth/register', payload);
 
       if (response.status === 201) {
@@ -37,11 +44,15 @@ export default function Register() {
       if (status === 409) {
         setIsDuplicate(true);
         setError(backendError || 'An account with that email already exists.');
+      } else if (!err.response) {
+        setError('Cannot connect to the server. Start the backend on port 5000 and try again.');
       } else {
         setError(backendError || 'Registration failed. Please check your details.');
       }
 
       console.error('Registration Error:', backendError || err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -98,12 +109,13 @@ export default function Register() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password123 (8+ chars, 1 uppercase, 1 digit)"
             required
+            minLength={8}
             style={{ width: '100%', padding: '10px', marginTop: '5px' }}
           />
         </label>
 
-        <button type="submit" className="primary-button" style={{ padding: '12px', cursor: 'pointer' }}>
-          Register
+        <button type="submit" className="primary-button" disabled={isSubmitting} style={{ padding: '12px', cursor: isSubmitting ? 'wait' : 'pointer' }}>
+          {isSubmitting ? 'Creating account...' : 'Register'}
         </button>
       </form>
 

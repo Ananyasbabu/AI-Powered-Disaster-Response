@@ -474,6 +474,11 @@ textarea {
 .layer-button { border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 999px; padding: 0.45rem 0.75rem; background: transparent; color: #9eafc3; cursor: pointer; }
 .layer-button.active, .layer-button:hover { background: #67d5c7; border-color: #67d5c7; color: #10252a; }
 .response-map { min-height: 440px; position: relative; overflow: hidden; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 1.25rem; background-color: #172d36; background-image: linear-gradient(rgba(103, 213, 199, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(103, 213, 199, 0.08) 1px, transparent 1px); background-size: 42px 42px; }
+.leaflet-map { width: min(100%, 760px); aspect-ratio: 1 / 1; margin: 0 auto; overflow: hidden; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 1.25rem; background: #dbe7e3; }
+.leaflet-map .leaflet-control-zoom a { color: #10252a; }
+.locate-button { border: 1px solid #c5d6d2; border-radius: 0.45rem; padding: 0.55rem 0.7rem; background: #10252a; color: #f1f7f4; cursor: pointer; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35); }
+.locate-button:hover { background: #2574e8; }
+.location-status { color: #9eafc3; font-size: 0.78rem; }
 .risk-zone { position: absolute; z-index: 1; border: 2px solid; border-radius: 42% 58% 55% 45%; transform: rotate(-8deg); }
 .map-road { position: absolute; z-index: 2; height: 7px; border-radius: 99px; background: rgba(228, 238, 233, 0.48); transform: rotate(-28deg); }
 .road-one { top: 49%; left: -5%; width: 110%; }.road-two { top: 28%; left: 35%; width: 75%; transform: rotate(64deg); }.road-three { top: 76%; left: 12%; width: 65%; transform: rotate(12deg); }

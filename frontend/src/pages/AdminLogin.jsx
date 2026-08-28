@@ -3,15 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
 export default function AdminLogin() {
-  const { login } = useContext(AuthContext);
+  const { adminLogin } = useContext(AuthContext);
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    const result = login(username.trim(), password, 'admin');
+    const result = await adminLogin(username.trim(), password);
     if (!result.success) {
       setError(result.message);
       return;
