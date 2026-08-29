@@ -21,7 +21,6 @@ export default function App() {
     navigate('/login');
   };
 
-  // Helper for consistent role-based redirection
   const getDefaultRoute = () => (user?.role === 'admin' ? '/admin' : '/dashboard');
 
   return (
@@ -39,6 +38,7 @@ export default function App() {
               ) : (
                 <>
                   <Link to="/dashboard">Dashboard</Link>
+                  <Link to="/flood-predict">Flood Prediction</Link>
                   <Link to="/report">Report</Link>
                   <Link to="/alerts">Alerts</Link>
                 </>
@@ -50,7 +50,6 @@ export default function App() {
             </>
           ) : (
             <>
-              <Link to="/alerts">Public Alerts</Link>
               <Link to="/login">Login</Link>
               <Link to="/register">Register</Link>
               <Link to="/admin-login">Admin Login</Link>
@@ -61,15 +60,12 @@ export default function App() {
 
       <main className="page-container">
         <Routes>
-          <Route path="/" element={<Navigate to={user ? getDefaultRoute() : '/alerts'} replace />} />
+          <Route path="/" element={<Navigate to={user ? getDefaultRoute() : '/login'} replace />} />
           <Route path="/login" element={user ? <Navigate to={getDefaultRoute()} /> : <Login />} />
           <Route path="/admin-login" element={user ? <Navigate to={getDefaultRoute()} /> : <AdminLogin />} />
           <Route path="/admin-register" element={user ? <Navigate to={getDefaultRoute()} /> : <AdminRegister />} />
           <Route path="/register" element={user ? <Navigate to={getDefaultRoute()} /> : <Register />} />
           
-          {/* Unprotected so citizens can view live warnings without logging in */}
-          <Route path="/alerts" element={<Alerts />} />
-
           <Route
             path="/dashboard"
             element={
@@ -79,10 +75,26 @@ export default function App() {
             }
           />
           <Route
+            path="/flood-predict"
+            element={
+              <ProtectedRoute allowedRoles={['citizen', 'admin']}>
+                <FloodPrediction />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/report"
             element={
               <ProtectedRoute allowedRoles={['citizen']}>
                 <ReportIncident />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/alerts"
+            element={
+              <ProtectedRoute allowedRoles={['citizen', 'admin']}>
+                <Alerts />
               </ProtectedRoute>
             }
           />
