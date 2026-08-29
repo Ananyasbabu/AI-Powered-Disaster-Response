@@ -12,6 +12,7 @@ from app.routes.health import health_bp
 from app.routes.auth import auth_bp
 from app.routes.incident_routes import init_incident_routes
 from app.routes.admin_routes import init_admin_routes
+from app.routes.alert_routes import init_alert_routes
 
 
 def create_app() -> Flask:
@@ -46,11 +47,13 @@ def create_app() -> Flask:
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp, url_prefix='/api')
 
-    # Register Member 2 & Admin Blueprints with /api prefix
+    # Register Incident, Admin & Alert Blueprints with /api prefix
     incident_bp = init_incident_routes(mongo.db)
     admin_bp = init_admin_routes(mongo.db)
+    alert_bp = init_alert_routes(mongo.db)
 
     app.register_blueprint(incident_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/api')
+    app.register_blueprint(alert_bp, url_prefix='/api')
 
     return app
