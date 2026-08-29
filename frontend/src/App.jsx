@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ReportIncident from './pages/ReportIncident';
+import FloodPrediction from './pages/FloodPrediction';
 
 export default function App() {
   const { user, logout } = useContext(AuthContext);
@@ -38,6 +39,7 @@ export default function App() {
               ) : (
                 <>
                   <Link to="/dashboard">Dashboard</Link>
+                  <Link to="/flood-predict">Flood Prediction</Link>
                   <Link to="/report">Report</Link>
                   <Link to="/alerts">Alerts</Link>
                 </>
