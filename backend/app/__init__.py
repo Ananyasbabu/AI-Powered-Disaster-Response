@@ -13,6 +13,7 @@ from app.routes.auth import auth_bp
 from app.routes.incident_routes import init_incident_routes
 from app.routes.admin_routes import init_admin_routes
 from app.routes.alert_routes import init_alert_routes
+from app.routes.flood_routes import flood_bp
 
 
 def create_app() -> Flask:
@@ -46,6 +47,7 @@ def create_app() -> Flask:
     # Register standard blueprints
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp, url_prefix='/api')
+    app.register_blueprint(flood_bp, url_prefix='/api')
 
     # Register Incident, Admin & Alert Blueprints with /api prefix
     incident_bp = init_incident_routes(mongo.db)

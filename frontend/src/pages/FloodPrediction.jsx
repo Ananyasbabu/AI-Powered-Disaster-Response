@@ -3,30 +3,80 @@ import API from '../api/axios';
 
 export default function FloodPrediction() {
   const [formData, setFormData] = useState({
-    rainfall: '',
-    riverLevel: '',
-    humidity: '',
+    latitude: '',
+    longitude: '',
   });
+
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Handle latitude/longitude input
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
   };
 
+  // Get user's current location
+  const getCurrentLocation = () => {
+    setErrorMessage('');
+    setPrediction(null);
+    setLocationLoading(true);
+
+    if (!navigator.geolocation) {
+      setErrorMessage('Geolocation is not supported by this browser.');
+      setLocationLoading(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setFormData({
+          latitude: position.coords.latitude.toFixed(6),
+          longitude: position.coords.longitude.toFixed(6),
+        });
+
+        setLocationLoading(false);
+      },
+      (error) => {
+        let message = 'Unable to get your current location.';
+
+        if (error.code === error.PERMISSION_DENIED) {
+          message = 'Location permission was denied. Please allow location access.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          message = 'Location information is unavailable.';
+        } else if (error.code === error.TIMEOUT) {
+          message = 'Location request timed out.';
+        }
+
+        setErrorMessage(message);
+        setLocationLoading(false);
+      }
+    );
+  };
+
+  // Send coordinates to backend
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     setLoading(true);
     setErrorMessage('');
     setPrediction(null);
 
     try {
-      const response = await API.post('/predict-flood', formData);
+      const response = await API.post('/predict-flood', {
+        latitude: Number(formData.latitude),
+        longitude: Number(formData.longitude),
+      });
+
       setPrediction(response.data);
     } catch (error) {
       setErrorMessage(
-        error.response?.data?.error || 'Failed to analyze risk. Ensure backend is running.'
+        error.response?.data?.error ||
+          'Failed to analyze risk. Ensure backend is running.'
       );
     } finally {
       setLoading(false);
@@ -38,80 +88,127 @@ export default function FloodPrediction() {
       <section className="dashboard-intro">
         <div>
           <p className="eyebrow">ML RISK ASSESSMENT</p>
+
           <h1>Flood Risk Prediction</h1>
+
           <p className="intro-copy">
-            Input localized environmental parameters to run the predictive model.
+            Enter a location or use your current location to assess flood risk.
           </p>
         </div>
       </section>
 
       <section className="dashboard-section">
         <div style={{ maxWidth: '450px' }}>
-          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '1rem' }}>
+
+          <form
+            onSubmit={handleSubmit}
+            style={{ display: 'grid', gap: '1rem' }}
+          >
+
+            {/* Latitude */}
             <div>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-                Rainfall Level (mm)
+              <label
+                style={{
+                  display: 'block',
+                  marginBottom: '0.4rem',
+                  fontWeight: 'bold',
+                }}
+              >
+                Latitude
               </label>
+
               <input
                 type="number"
                 step="any"
-                name="rainfall"
-                placeholder="e.g., 120"
-                value={formData.rainfall}
+                name="latitude"
+                placeholder="e.g., 13.076487"
+                value={formData.latitude}
                 onChange={handleChange}
                 required
-                style={{ width: '100%', padding: '0.6rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc',
+                }}
               />
             </div>
 
+            {/* Longitude */}
             <div>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-                River Level (meters)
+              <label
+                style={{
+                  display: 'block',
+                  marginBottom: '0.4rem',
+                  fontWeight: 'bold',
+                }}
+              >
+                Longitude
               </label>
+
               <input
                 type="number"
                 step="any"
-                name="riverLevel"
-                placeholder="e.g., 4.5"
-                value={formData.riverLevel}
+                name="longitude"
+                placeholder="e.g., 80.281774"
+                value={formData.longitude}
                 onChange={handleChange}
                 required
-                style={{ width: '100%', padding: '0.6rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem',
+                  borderRadius: '4px',
+                  border: '1px solid #ccc',
+                }}
               />
             </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 'bold' }}>
-                Humidity (%)
-              </label>
-              <input
-                type="number"
-                step="any"
-                name="humidity"
-                placeholder="e.g., 85"
-                value={formData.humidity}
-                onChange={handleChange}
-                required
-                style={{ width: '100%', padding: '0.6rem', borderRadius: '4px', border: '1px solid #ccc' }}
-              />
-            </div>
+            {/* Current Location */}
+            <button
+              type="button"
+              onClick={getCurrentLocation}
+              disabled={locationLoading || loading}
+              style={{
+                padding: '0.7rem',
+                cursor: 'pointer',
+              }}
+            >
+              {locationLoading
+                ? 'Getting Location...'
+                : 'Use Current Location'}
+            </button>
 
+            {/* Prediction */}
             <button
               type="submit"
               className="primary-button"
-              disabled={loading}
-              style={{ padding: '0.7rem', cursor: 'pointer' }}
+              disabled={loading || locationLoading}
+              style={{
+                padding: '0.7rem',
+                cursor: 'pointer',
+              }}
             >
-              {loading ? 'Processing Model...' : 'Calculate Prediction'}
+              {loading
+                ? 'Processing Model...'
+                : 'Calculate Flood Risk'}
             </button>
+
           </form>
 
+          {/* Error */}
           {errorMessage && (
-            <div style={{ marginTop: '1rem', color: '#ef6a55', fontWeight: 'bold' }}>
+            <div
+              style={{
+                marginTop: '1rem',
+                color: '#ef6a55',
+                fontWeight: 'bold',
+              }}
+            >
               {errorMessage}
             </div>
           )}
 
+          {/* Prediction Result */}
           {prediction && (
             <div
               style={{
@@ -122,12 +219,35 @@ export default function FloodPrediction() {
                 backgroundColor: 'rgba(37, 116, 232, 0.1)',
               }}
             >
-              <h3 style={{ margin: '0 0 0.5rem 0' }}>Predicted Risk: {prediction.risk_level}</h3>
-              {prediction.probability && (
-                <p style={{ margin: 0 }}>Model Confidence: {prediction.probability}%</p>
+              <h2 style={{ marginTop: 0 }}>
+                Flood Risk: {prediction.risk_level}
+              </h2>
+
+              <p>
+                <strong>Low Probability:</strong>{' '}
+                {(prediction.low_probability * 100).toFixed(2)}%
+              </p>
+
+              <p>
+                <strong>Medium Probability:</strong>{' '}
+                {(prediction.medium_probability * 100).toFixed(2)}%
+              </p>
+
+              <p>
+                <strong>High Probability:</strong>{' '}
+                {(prediction.high_probability * 100).toFixed(2)}%
+              </p>
+
+              {prediction.dataset_location && (
+                <p style={{ marginBottom: 0 }}>
+                  <strong>Location analyzed:</strong>{' '}
+                  {prediction.dataset_location.latitude},{' '}
+                  {prediction.dataset_location.longitude}
+                </p>
               )}
             </div>
           )}
+
         </div>
       </section>
     </div>
