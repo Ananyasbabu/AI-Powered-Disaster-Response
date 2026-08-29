@@ -1,6 +1,7 @@
 import os
 import pickle
 import numpy as np
+import pandas as pd
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -10,7 +11,7 @@ from app.extensions import bcrypt
 from app.routes.auth import auth_bp
 from app.routes.admin_routes import admin_bp
 from app.routes.incident_routes import init_incident_routes
-
+from predict import predict_flood_risk
 load_dotenv()
 
 app = Flask(__name__)
@@ -23,50 +24,72 @@ mongo = PyMongo(app)
 db = mongo.db
 
 # --- ML MODEL INTEGRATION ---
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model.pkl')
+MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
+MODEL_PATH = os.path.join(MODELS_DIR, 'flood_risk_xgb_model.pkl')
+PREPROCESSOR_PATH = os.path.join(MODELS_DIR, 'flood_risk_preprocessor.pkl')
+
+ml_model = None
+preprocessor = None
+
+# 1. Load XGBoost Model
 try:
-    with open(MODEL_PATH, 'rb') as f:
-        ml_model = pickle.load(f)
-    print("ML Model loaded successfully.")
+    if os.path.exists(MODEL_PATH):
+        with open(MODEL_PATH, 'rb') as f:
+            ml_model = pickle.load(f)
+        print("XGBoost model loaded successfully.")
+    else:
+        print(f"Warning: Model file not found at {MODEL_PATH}")
 except Exception as e:
-    print(f"Warning: ML model not found or failed to load ({e}).")
-    ml_model = None
+    print(f"Error loading ML model: {e}")
 
-@app.route('/api/predict-flood', methods=['POST'])
-def predict_flood():
-    if not ml_model:
-        return jsonify({'error': 'ML model is not loaded on server.'}), 500
-    
-    try:
-        data = request.get_json()
-        rainfall = float(data.get('rainfall', 0))
-        river_level = float(data.get('riverLevel', 0))
-        humidity = float(data.get('humidity', 0))
-
-        # Adjust shape based on how your ML model was trained
-        features = np.array([[rainfall, river_level, humidity]])
-        prediction = ml_model.predict(features)[0]
-
-        probability = None
-        if hasattr(ml_model, "predict_proba"):
-            probability = round(float(np.max(ml_model.predict_proba(features))) * 100, 2)
-
-        risk_mapping = {0: 'Low Risk', 1: 'Moderate Risk', 2: 'High Risk'}
-        risk_label = risk_mapping.get(prediction, str(prediction))
-
-        return jsonify({
-            'status': 'success',
-            'risk_level': risk_label,
-            'probability': probability
-        }), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+# 2. Load Preprocessor (with fallback handling for Python version mismatches)
+try:
+    if os.path.exists(PREPROCESSOR_PATH):
+        with open(PREPROCESSOR_PATH, 'rb') as f:
+            preprocessor = pickle.load(f)
+        print("Preprocessor loaded successfully.")
+    else:
+        print(f"Warning: Preprocessor file not found at {PREPROCESSOR_PATH}")
+except Exception as e:
+    print(f"Warning: Preprocessor failed to load ({e}). System will fall back to raw input array.")
+    preprocessor = None
 # ----------------------------
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+@app.route('/api/predict-flood', methods=['POST'])
+def predict_flood():
+    try:
+        data = request.get_json() or {}
+        
+        lat = float(data.get('latitude', 0))
+        lng = float(data.get('longitude', 0))
+
+        # Pass latitude, longitude, and default values for remaining required features
+        result = predict_flood_risk(
+            latitude=lat,
+            longitude=lng,
+            elevation_m=float(data.get('elevation_m', 15.0)),
+            land_use=data.get('land_use', 'Residential'),
+            soil_group=data.get('soil_group', 'B'),
+            drainage_density_km_per_km2=float(data.get('drainage_density_km_per_km2', 1.5)),
+            storm_drain_proximity_m=float(data.get('storm_drain_proximity_m', 100.0)),
+            storm_drain_type=data.get('storm_drain_type', 'Open Ditch'),
+            historical_rainfall_intensity_mm_hr=float(data.get('historical_rainfall_intensity_mm_hr', 45.0))
+        )
+
+        return jsonify({
+            'status': 'success',
+            'risk_level': result['risk'],
+            'low_probability': result['low_probability'],
+            'medium_probability': result['medium_probability'],
+            'high_probability': result['high_probability']
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': f"Prediction error: {str(e)}"}), 400
 
 @app.route('/uploads/<path:filename>')
 def serve_uploads(filename):
