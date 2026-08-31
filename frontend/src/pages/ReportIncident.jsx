@@ -1,203 +1,253 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import API from '../api/axios';
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
 export default function ReportIncident() {
   const [file, setFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [incidentType, setIncidentType] = useState('Flood');
   const [severity, setSeverity] = useState('Medium');
   const [description, setDescription] = useState('');
   const [reporterId, setReporterId] = useState('');
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
-  const [locationStatus, setLocationStatus] = useState('');
+  const [location, setLocation] = useState(null);
+  const [locationMessage, setLocationMessage] = useState('');
+  const [gettingLocation, setGettingLocation] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Auto-fetch browser GPS coordinates on load
-  const getLocation = () => {
-    if (navigator.geolocation) {
-      setLocationStatus('Fetching live GPS coordinates...');
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLat(position.coords.latitude.toFixed(6));
-          setLng(position.coords.longitude.toFixed(6));
-          setLocationStatus('GPS Location captured!');
-        },
-        (error) => {
-          console.error('Location fetch failed:', error);
-          setLocationStatus('Unable to retrieve automatic location. Please enter manually.');
-        }
-      );
-    } else {
-      setLocationStatus('Geolocation is not supported by your browser.');
+  const handleImageChange = (event) => {
+    const selectedFile = event.target.files[0];
+
+    if (!selectedFile) {
+      return;
     }
+
+    if (!selectedFile.type.startsWith('image/')) {
+      alert('Please select a valid image file.');
+      event.target.value = '';
+      return;
+    }
+
+    if (selectedFile.size > MAX_IMAGE_SIZE) {
+      alert('Image size must be less than 5 MB.');
+      event.target.value = '';
+      return;
+    }
+
+    setFile(selectedFile);
+    setImagePreview(URL.createObjectURL(selectedFile));
   };
 
-  useEffect(() => {
-    getLocation();
-  }, []);
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationMessage('Location is not supported by this browser.');
+      return;
+    }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+    setGettingLocation(true);
+    setLocationMessage('Getting your current location...');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+
+        setLocationMessage('Location added successfully.');
+        setGettingLocation(false);
+      },
+      () => {
+        setLocation(null);
+        setLocationMessage(
+          'Unable to get your location. Please allow location permission and try again.'
+        );
+        setGettingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
     if (!file) {
       alert('Please select an incident image to upload.');
       return;
     }
-    if (!lat || !lng) {
-      alert('Location coordinates (Latitude & Longitude) are required.');
+
+    if (!location) {
+      alert('Please click "Use My Current Location" before submitting the report.');
       return;
     }
 
     setLoading(true);
+
     const formData = new FormData();
+
     formData.append('image', file);
-    formData.append('latitude', lat);
-    formData.append('longitude', lng);
     formData.append('type', incidentType);
     formData.append('severity', severity);
-    formData.append('description', description);
-    formData.append('reporter_id', reporterId || 'anonymous');
+    formData.append('description', description.trim());
+    formData.append('reporter_id', reporterId.trim() || 'anonymous');
+    formData.append('latitude', location.latitude);
+    formData.append('longitude', location.longitude);
 
     try {
-      const res = await API.post('/incidents/report', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 60000, 
+      const response = await API.post('/incidents/report', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 60000,
       });
 
-      const { verification } = res.data;
-      const weatherVerified = verification?.weather?.verified ? 'Verified' : 'Flagged';
-      
+      const predictedType =
+        response.data.verification?.cv?.detected_labels?.[0] || 'Pending';
+
       alert(
-        `Report Submitted Successfully!\n\n` +
-        `Overall Status: ${verification?.overall_status || 'Submitted'}\n` +
-        `CV Verification: ${verification?.cv?.status || 'N/A'}\n` +
-        `Weather Verification: ${weatherVerified}`
+        `Report submitted successfully!\n\n` +
+        `Report ID: ${response.data.incident_id}\n` +
+        `AI prediction: ${predictedType}\n` +
+        `Status: PENDING — waiting for admin approval.`
       );
 
-      // Reset optional form fields
       setFile(null);
+      setImagePreview(null);
+      setIncidentType('Flood');
+      setSeverity('Medium');
       setDescription('');
-    } catch (err) {
-      console.error('Submission failed:', err);
-      alert(err.response?.data?.message || 'Failed to submit report');
+      setReporterId('');
+      setLocation(null);
+      setLocationMessage('');
+    } catch (error) {
+      console.error('Submission failed:', error);
+      alert(error.response?.data?.message || 'Failed to submit report.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '450px', margin: '20px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
+    <div style={{ maxWidth: '500px', margin: '20px auto' }}>
       <h2>Report Emergency Incident</h2>
+      <p>Share an incident image and your location to help emergency responders.</p>
+
       <form onSubmit={handleSubmit}>
-        
-        {/* Reporter Info */}
-        <div style={{ marginBottom: '12px' }}>
-          <label><strong>Contact / Reporter ID:</strong></label>
-          <input 
-            type="text" 
-            placeholder="Enter your name or phone number" 
-            value={reporterId} 
-            onChange={(e) => setReporterId(e.target.value)}
-            style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+        <div style={{ marginBottom: '16px' }}>
+          <label>Reporter Name or Contact (optional):</label>
+
+          <input
+            type="text"
+            value={reporterId}
+            onChange={(event) => setReporterId(event.target.value)}
+            placeholder="Your name or contact number"
           />
         </div>
 
-        {/* Incident Type */}
-        <div style={{ marginBottom: '12px' }}>
-          <label><strong>Incident Type:</strong></label>
-          <select 
-            value={incidentType} 
-            onChange={(e) => setIncidentType(e.target.value)}
-            style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+        <div style={{ marginBottom: '16px' }}>
+          <label>Incident Type:</label>
+
+          <select
+            value={incidentType}
+            onChange={(event) => setIncidentType(event.target.value)}
+            required
           >
             <option value="Flood">Flood / Waterlogging</option>
-            <option value="Storm">Storm / Severe Weather</option>
             <option value="Blocked Road">Blocked Road</option>
-            <option value="Structural Damage">Structural Damage / Landslide</option>
-            <option value="Fire">Fire / Explosion</option>
+            <option value="Structural Damage">Structural Damage</option>
+            <option value="Landslide">Landslide</option>
+            <option value="Fire">Fire</option>
+            <option value="Fallen Tree">Fallen Tree</option>
+            <option value="Other">Other</option>
           </select>
         </div>
 
-        {/* Severity */}
-        <div style={{ marginBottom: '12px' }}>
-          <label><strong>Severity Level:</strong></label>
-          <select 
-            value={severity} 
-            onChange={(e) => setSeverity(e.target.value)}
-            style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+        <div style={{ marginBottom: '16px' }}>
+          <label>Severity Level:</label>
+
+          <select
+            value={severity}
+            onChange={(event) => setSeverity(event.target.value)}
           >
-            <option value="Low">Low (Minor Hazard)</option>
-            <option value="Medium">Medium (Property Damage / Obstruction)</option>
-            <option value="High">High (Life Threatening Emergency)</option>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
           </select>
         </div>
 
-        {/* Description */}
-        <div style={{ marginBottom: '12px' }}>
-          <label><strong>Description:</strong></label>
-          <textarea 
-            placeholder="Describe what is happening at the scene..." 
-            value={description} 
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+        <div style={{ marginBottom: '16px' }}>
+          <label>Description:</label>
+
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Briefly describe the emergency situation..."
+            maxLength={500}
+            rows="4"
             required
           />
         </div>
 
-        {/* Location Coordinates */}
-        <div style={{ marginBottom: '12px' }}>
-          <label><strong>Location Coordinates:</strong></label>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-            <input 
-              type="text" 
-              placeholder="Latitude" 
-              value={lat} 
-              onChange={(e) => setLat(e.target.value)}
-              style={{ width: '50%', padding: '8px' }}
-              required
-            />
-            <input 
-              type="text" 
-              placeholder="Longitude" 
-              value={lng} 
-              onChange={(e) => setLng(e.target.value)}
-              style={{ width: '50%', padding: '8px' }}
-              required
+        <div style={{ marginBottom: '16px' }}>
+          <label>Upload Image:</label>
+
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp"
+            onChange={handleImageChange}
+            required
+          />
+
+          <small>Accepted: JPG, PNG, WEBP. Maximum size: 5 MB.</small>
+        </div>
+
+        {imagePreview && (
+          <div style={{ marginBottom: '16px' }}>
+            <p>Image Preview:</p>
+
+            <img
+              src={imagePreview}
+              alt="Selected incident"
+              style={{
+                width: '100%',
+                maxHeight: '280px',
+                objectFit: 'cover',
+                borderRadius: '8px',
+              }}
             />
           </div>
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{locationStatus}</p>
-          <button type="button" onClick={getLocation} style={{ fontSize: '12px', padding: '4px 8px' }}>
-            Refresh GPS Coordinates
-          </button>
-        </div>
+        )}
 
-        {/* Image Upload */}
         <div style={{ marginBottom: '16px' }}>
-          <label><strong>Upload Incident Image:</strong></label>
-          <input 
-            type="file" 
-            accept="image/*" 
-            onChange={(e) => setFile(e.target.files[0])} 
-            style={{ marginTop: '4px', display: 'block' }}
-            required 
-          />
+          <label>Incident Location:</label>
+
+          <button
+            type="button"
+            onClick={useCurrentLocation}
+            disabled={gettingLocation}
+            style={{ display: 'block', marginTop: '8px' }}
+          >
+            {gettingLocation ? 'Getting Location...' : 'Use My Current Location'}
+          </button>
+
+          {locationMessage && (
+            <p
+              style={{
+                color: location ? '#22c55e' : '#f59e0b',
+                marginTop: '8px',
+              }}
+            >
+              {locationMessage}
+            </p>
+          )}
         </div>
 
-        {/* Submit Button */}
-        <button 
-          type="submit" 
-          disabled={loading}
-          style={{ 
-            width: '100%', 
-            padding: '10px', 
-            backgroundColor: loading ? '#ccc' : '#d9534f', 
-            color: '#fff', 
-            border: 'none', 
-            borderRadius: '4px',
-            cursor: loading ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {loading ? 'Validating with AI & Live Weather...' : 'Submit Incident Report'}
+        <button type="submit" disabled={loading || gettingLocation}>
+          {loading ? 'Submitting Report...' : 'Submit Report'}
         </button>
       </form>
     </div>

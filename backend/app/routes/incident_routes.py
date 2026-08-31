@@ -1,12 +1,32 @@
 import os
+import uuid
+from datetime import datetime
+
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
-from datetime import datetime
-from app.services.cv_service import verify_incident_image
-from app.services.weather_service import verify_with_weather  # Imports weather service
 
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '..', '..', 'uploads')
+from app.services.cv_service import verify_incident_image
+from app.services.weather_service import verify_with_weather
+
+
+UPLOAD_FOLDER = os.path.join(
+    os.path.dirname(__file__),
+    '..',
+    '..',
+    'uploads'
+)
+
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+def allowed_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
+
 
 def init_incident_routes(db):
     incident_bp = Blueprint('incident_bp', __name__)
@@ -14,42 +34,114 @@ def init_incident_routes(db):
     @incident_bp.route('/incidents/report', methods=['POST'])
     def report_incident():
         if 'image' not in request.files:
-            return jsonify({"status": "error", "message": "No image uploaded"}), 400
+            return jsonify({
+                "status": "error",
+                "message": "Please upload an incident image."
+            }), 400
 
         file = request.files['image']
+
+        if file.filename == '':
+            return jsonify({
+                "status": "error",
+                "message": "Please select an image file."
+            }), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({
+                "status": "error",
+                "message": "Only JPG, JPEG, PNG, and WEBP images are allowed."
+            }), 400
+
         incident_type = request.form.get('type', 'Flood')
+
+        allowed_incident_types = [
+            "Flood",
+            "Blocked Road",
+            "Structural Damage",
+            "Landslide",
+            "Fire",
+            "Fallen Tree",
+            "Other",
+        ]
+
+        if incident_type not in allowed_incident_types:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid incident type."
+            }), 400
+
+        description = request.form.get('description', '').strip()
+        severity = request.form.get('severity', 'Medium')
+        reporter_id = request.form.get('reporter_id', 'anonymous')
+
+        if len(description) > 500:
+            return jsonify({
+                "status": "error",
+                "message": "Description must be 500 characters or fewer."
+            }), 400
+
+        if severity not in ["Low", "Medium", "High"]:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid severity level."
+            }), 400
+
         latitude = request.form.get('latitude')
         longitude = request.form.get('longitude')
-        reporter_id = request.form.get('reporter_id', 'anonymous')
-        description = request.form.get('description', '')
-        severity = request.form.get('severity', 'Medium')
 
         if not latitude or not longitude:
-            return jsonify({"status": "error", "message": "Location coordinates required"}), 400
+            return jsonify({
+                "status": "error",
+                "message": "Current location is required."
+            }), 400
 
-        filename = f"{int(datetime.utcnow().timestamp())}_{secure_filename(file.filename)}"
+        try:
+            latitude = float(latitude)
+            longitude = float(longitude)
+        except ValueError:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid location coordinates."
+            }), 400
+
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return jsonify({
+                "status": "error",
+                "message": "Location coordinates are outside the valid range."
+            }), 400
+
+        original_filename = secure_filename(file.filename)
+        filename = f"{uuid.uuid4().hex}_{original_filename}"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
+
         file.save(filepath)
 
-        # 1. Computer Vision Verification
+        # Computer-vision incident-type prediction.
         cv_result = verify_incident_image(filepath)
 
-        # 2. Live Weather API Verification
-        weather_result = verify_with_weather(float(latitude), float(longitude), incident_type)
+        if cv_result.get("status") == "invalid_image":
+            if os.path.exists(filepath):
+                os.remove(filepath)
 
-        # 3. Overall Verification Logic (Verified if CV OR Weather confirms high confidence)
-        is_cv_verified = cv_result.get("status") == "verified"
-        is_weather_verified = weather_result.get("verified", False)
+            return jsonify({
+                "status": "error",
+                "message": cv_result.get(
+                    "message",
+                    "The uploaded file is not a valid image."
+                )
+            }), 400
 
-        if is_cv_verified and is_weather_verified:
-            final_status = "verified"
-            overall_confidence = "High"
-        elif is_cv_verified or is_weather_verified:
-            final_status = "verified"
-            overall_confidence = "Medium"
-        else:
-            final_status = "pending_review"
-            overall_confidence = "Low"
+        # Weather data is supporting information only.
+        weather_result = verify_with_weather(
+            latitude,
+            longitude,
+            incident_type
+        )
+
+        # AI and weather results do not automatically approve a citizen report.
+        incident_status = "PENDING"
+        cv_result["status"] = "pending_review"
 
         incident_doc = {
             "reporter_id": reporter_id,
@@ -57,45 +149,62 @@ def init_incident_routes(db):
             "severity": severity,
             "description": description,
             "image_url": f"uploads/{filename}",
+            "original_filename": original_filename,
             "location": {
                 "type": "Point",
-                "coordinates": [float(longitude), float(latitude)]
+                "coordinates": [longitude, latitude]
+            },
+            "image_details": {
+                "format": cv_result.get("image_format"),
+                "width": cv_result.get("image_width"),
+                "height": cv_result.get("image_height")
             },
             "cv_verification": {
-                "status": cv_result.get("status", "pending"),
+                "status": cv_result.get("status", "pending_review"),
                 "confidence_score": cv_result.get("confidence_score", 0.0),
-                "detected_labels": cv_result.get("detected_labels", [])
+                "detected_labels": cv_result.get("detected_labels", []),
+                "detections": cv_result.get("detections", []),
+                "model": cv_result.get(
+                    "model",
+                    "CLIP Zero-Shot Incident Classifier"
+                ),
+                "message": cv_result.get("message", "")
             },
             "weather_verification": weather_result,
-            "overall_confidence": overall_confidence,
-            "status": final_status,
-            "created_at": datetime.utcnow()
+            "overall_confidence": "Pending admin review",
+            "status": incident_status,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
         }
 
         inserted_id = db.incidents.insert_one(incident_doc).inserted_id
 
         return jsonify({
             "status": "success",
-            "message": "Incident reported and analyzed successfully!",
+            "message": (
+                "Incident submitted successfully. "
+                "AI prediction is saved and awaiting admin review."
+            ),
             "incident_id": str(inserted_id),
             "verification": {
                 "cv": cv_result,
                 "weather": weather_result,
-                "overall_status": final_status
+                "overall_status": incident_status
             }
         }), 201
 
     @incident_bp.route('/incidents/verified', methods=['GET'])
     def get_verified_incidents():
         incidents = list(db.incidents.find({
-            "$or": [
-                {"status": "verified"},
-                {"cv_verification.status": "verified"},
-                {"weather_verification.verified": True}
-            ]
+            "status": "VERIFIED"
         }))
-        for inc in incidents:
-            inc['_id'] = str(inc['_id'])
-        return jsonify({"status": "success", "data": incidents}), 200
+
+        for incident in incidents:
+            incident['_id'] = str(incident['_id'])
+
+        return jsonify({
+            "status": "success",
+            "data": incidents
+        }), 200
 
     return incident_bp
