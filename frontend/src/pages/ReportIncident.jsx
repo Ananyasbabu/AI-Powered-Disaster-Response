@@ -109,7 +109,7 @@ export default function ReportIncident() {
       alert(
         `Report submitted successfully!\n\n` +
         `Report ID: ${response.data.incident_id}\n` +
-        `AI prediction: ${predictedType}\n` +
+        `Verification Result: ${predictedType}\n` +
         `Status: PENDING — waiting for admin approval.`
       );
 
