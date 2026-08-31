@@ -9,3 +9,7 @@ Pillow==12.3.0
 ultralytics
 transformers
 hf_xet
+pandas
+joblib
+xgboost
+scikit-learn

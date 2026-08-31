@@ -9,7 +9,6 @@ export default function ReportIncident() {
   const [incidentType, setIncidentType] = useState('Flood');
   const [severity, setSeverity] = useState('Medium');
   const [description, setDescription] = useState('');
-  const [reporterId, setReporterId] = useState('');
   const [location, setLocation] = useState(null);
   const [locationMessage, setLocationMessage] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
@@ -93,7 +92,6 @@ export default function ReportIncident() {
     formData.append('type', incidentType);
     formData.append('severity', severity);
     formData.append('description', description.trim());
-    formData.append('reporter_id', reporterId.trim() || 'anonymous');
     formData.append('latitude', location.latitude);
     formData.append('longitude', location.longitude);
 
@@ -120,7 +118,6 @@ export default function ReportIncident() {
       setIncidentType('Flood');
       setSeverity('Medium');
       setDescription('');
-      setReporterId('');
       setLocation(null);
       setLocationMessage('');
     } catch (error) {
@@ -137,17 +134,6 @@ export default function ReportIncident() {
       <p>Share an incident image and your location to help emergency responders.</p>
 
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '16px' }}>
-          <label>Reporter Name or Contact (optional):</label>
-
-          <input
-            type="text"
-            value={reporterId}
-            onChange={(event) => setReporterId(event.target.value)}
-            placeholder="Your name or contact number"
-          />
-        </div>
-
         <div style={{ marginBottom: '16px' }}>
           <label>Incident Type:</label>
 
