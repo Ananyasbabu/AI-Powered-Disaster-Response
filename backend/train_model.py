@@ -7,13 +7,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, LabelEncoder
 from sklearn.compose import ColumnTransformer
 
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "data", "flood_test_data.csv")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-MODEL_PATH = os.path.join(MODELS_DIR, "flood_risk_xgb_model.pkl")
+# 1. FIX: Save XGBoost model natively as JSON (fixes all XGBoost warnings)
+MODEL_PATH = os.path.join(MODELS_DIR, "flood_risk_xgb_model.json")
 PREPROCESSOR_PATH = os.path.join(MODELS_DIR, "flood_risk_preprocessor.pkl")
 LABEL_ENCODER_PATH = os.path.join(MODELS_DIR, "flood_risk_label_encoder.pkl")
 
@@ -24,13 +26,13 @@ def train():
 
     df = pd.read_csv(DATA_PATH)
 
-    # 1. Feature Engineering
+    # Feature Engineering
     df["runoff_index"] = df["historical_rainfall_intensity_mm_hr"] / (df["elevation_m"] + 1.0)
     df["drainage_inefficiency"] = df["storm_drain_proximity_m"] / (df["drainage_density_km_per_km2"] + 0.1)
 
     X = df.drop(columns=["risk"])
     
-    # 2. Encode string targets ('High', 'Low', 'Medium') -> integers (0, 1, 2)
+    # Encode targets
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(df["risk"])
 
@@ -54,7 +56,7 @@ def train():
         X_processed, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
     )
 
-    # 3. Fit XGBoost Model
+    # Fit XGBoost Model
     model = xgb.XGBClassifier(
         n_estimators=150,
         max_depth=5,
@@ -67,12 +69,12 @@ def train():
 
     model.fit(X_train, y_train)
 
-    # 4. Save model, preprocessor, and label encoder
-    joblib.dump(model, MODEL_PATH)
+    # 2. FIX: Save model natively using save_model() instead of joblib
+    model.save_model(MODEL_PATH)
     joblib.dump(preprocessor, PREPROCESSOR_PATH)
     joblib.dump(label_encoder, LABEL_ENCODER_PATH)
     
-    print("SUCCESS: Retrained XGBoost model, preprocessor, and label encoder saved to models/")
+    print("SUCCESS: Retrained XGBoost model (JSON format), preprocessor, and label encoder saved to models/")
 
 if __name__ == "__main__":
     train()

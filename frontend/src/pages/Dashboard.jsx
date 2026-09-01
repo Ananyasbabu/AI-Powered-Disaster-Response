@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import API from '../api/axios';
 
 // Utility: Calculate Haversine distance in km
@@ -25,19 +25,26 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
   const tappedMarker = useRef(null);
 
   useEffect(() => {
-    if (!mapElement.current || mapRef.current) return undefined;
+    if (!mapElement.current) return undefined;
 
-    const initialLat = userCoords ? userCoords.lat : 14.2798;
-    const initialLng = userCoords ? userCoords.lng : 74.4441;
+    if (!mapRef.current) {
+      const initialLat = userCoords ? userCoords.lat : 14.2798;
+      const initialLng = userCoords ? userCoords.lng : 74.4441;
 
-    const map = L.map(mapElement.current).setView([initialLat, initialLng], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19,
-    }).addTo(map);
-    mapRef.current = map;
+      const map = L.map(mapElement.current).setView([initialLat, initialLng], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map);
 
-    const updateLocationPoint = (lat, lng, accuracy, isManual = false) => {
+      mapRef.current = map;
+    }
+
+    const map = mapRef.current;
+
+    const updateLocationPoint = (lat, lng, accuracy) => {
+      if (!map || !map.getContainer()) return;
+
       const point = [lat, lng];
 
       if (locationMarker.current) {
@@ -52,7 +59,7 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
 
         locationMarker.current.on('dragend', (event) => {
           const newPos = event.target.getLatLng();
-          onLocationChange(newPos.lat, newPos.lng, `Exact location pinned: ${newPos.lat.toFixed(5)}, ${newPos.lng.toFixed(5)}`);
+          onLocationChange(newPos.lat, newPos.lng, `Exact location pinned: ${newPos.lat.toFixed(5)}, ${newPos.lng.toFixed(5)}`, true);
         });
       }
 
@@ -60,7 +67,7 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
         map.setView(point, 13);
       }
 
-      onLocationChange(lat, lng, `GPS position updated (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+      onLocationChange(lat, lng, `GPS position updated (${lat.toFixed(4)}, ${lng.toFixed(4)})`, false);
     };
 
     const handleLocationSuccess = (position) => {
@@ -69,13 +76,15 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
     };
 
     const handleLocationError = () => {
-      onLocationChange(initialLat, initialLng, 'GPS unavailable. Tap map to select manual location.');
+      const fallbackLat = userCoords ? userCoords.lat : 14.2798;
+      const fallbackLng = userCoords ? userCoords.lng : 74.4441;
+      onLocationChange(fallbackLat, fallbackLng, 'GPS unavailable. Tap map to select manual location.', false);
     };
 
-    let watchId;
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError, { enableHighAccuracy: true });
-      watchId = navigator.geolocation.watchPosition(handleLocationSuccess, handleLocationError, { enableHighAccuracy: true });
+      navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError, { enableHighAccuracy: true, timeout: 10000 });
+    } else {
+      handleLocationError();
     }
 
     map.on('click', (e) => {
@@ -87,19 +96,19 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
         .bindPopup(`Selected spot: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
         .openPopup();
 
-      onLocationChange(lat, lng, `Selected point: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      onLocationChange(lat, lng, `Selected point: ${lat.toFixed(5)}, ${lng.toFixed(5)}`, true);
     });
 
     return () => {
-      if (watchId !== undefined) navigator.geolocation?.clearWatch(watchId);
-      map.remove();
-      mapRef.current = null;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
       locationMarker.current = null;
       tappedMarker.current = null;
     };
   }, []);
 
-  // Update map layer markers for Shelters and ML Risk Status
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
@@ -108,16 +117,16 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
     if (activeLayer !== 'risk') {
       shelters.forEach((shelter) => {
         const isSelected = selectedShelter?.id === shelter.id;
-        const markerColor = shelter.is_safe ? '#53b889' : '#d94a5f'; // Green for Safe ML score, Red for Unsafe ML score
+        const markerColor = shelter.is_safe ? '#53b889' : '#d94a5f';
 
-        const circle = L.circleMarker([shelter.lat, shelter.lng], {
+        const circle = L.circleMarker([shelter.lat, shelter.lon || shelter.lng], {
           radius: isSelected ? 12 : 8,
           color: isSelected ? '#333' : '#fff',
           weight: 2,
           fillColor: markerColor,
           fillOpacity: 0.9,
         })
-          .bindTooltip(`<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.status}</b><br/>Distance: ${shelter.distance}`)
+          .bindTooltip(`<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}`)
           .on('click', () => onShelterSelect(shelter))
           .addTo(map);
 
@@ -154,79 +163,70 @@ export default function Dashboard() {
   const [incidents, setIncidents] = useState([]);
   const [userCoords, setUserCoords] = useState({ lat: 14.2798, lng: 74.4441 });
   const [shelters, setShelters] = useState([]);
-  const [loadingShelters, setLoadingShelters] = useState(false);
+  const [loadingShelters, setLoadingShelters] = useState(true);
   const [activeLayer, setActiveLayer] = useState('all');
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [locationMessage, setLocationMessage] = useState('Acquiring location...');
 
+  const activeAbortController = useRef(null);
+  const lastFetchedCoords = useRef({ lat: null, lng: null });
+
   useEffect(() => {
     API.get('/incidents/verified')
-      .then((res) => setIncidents(res.data.data))
+      .then((res) => setIncidents(res.data.data || []))
       .catch((err) => console.error('Error loading incidents:', err));
   }, []);
 
-  // Overpass API fetcher for 10km Nearby Schools/Colleges
-  const fetchNearbyInstitutions = useCallback(async (lat, lng) => {
+  const fetchNearbyInstitutions = useCallback(async (lat, lng, force = false) => {
+    if (
+      !force &&
+      lastFetchedCoords.current.lat &&
+      calculateDistance(lastFetchedCoords.current.lat, lastFetchedCoords.current.lng, lat, lng) < 0.5
+    ) {
+      return;
+    }
+
+    if (activeAbortController.current) {
+      activeAbortController.current.abort();
+    }
+    const controller = new AbortController();
+    activeAbortController.current = controller;
+
+    lastFetchedCoords.current = { lat, lng };
     setLoadingShelters(true);
+
     try {
-      const radiusMeters = 10000; // 10 km
-      const query = `
-        [out:json][timeout:25];
-        (
-          node["amenity"="school"](around:${radiusMeters},${lat},${lng});
-          node["amenity"="college"](around:${radiusMeters},${lat},${lng});
-          way["amenity"="school"](around:${radiusMeters},${lat},${lng});
-          way["amenity"="college"](around:${radiusMeters},${lat},${lng});
-        );
-        out center 15;
-      `;
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: 'data=' + encodeURIComponent(query),
-      });
+      const response = await API.post('/predict-shelters-risk', { lat, lng }, { signal: controller.signal });
+      const rawShelters = response.data.data || [];
 
-      const data = await response.json();
-      const rawInstitutions = (data.elements || [])
-        .map((elem, idx) => {
-          const itemLat = elem.lat || elem.center?.lat;
-          const itemLng = elem.lon || elem.center?.lon;
-          if (!itemLat || !itemLng) return null;
+      const formattedShelters = rawShelters.map((s) => ({
+        ...s,
+        lng: s.lon,
+        distance: `${calculateDistance(lat, lng, s.lat, s.lon)} km`,
+        facilities: 'Water, Emergency Shelter, Power',
+        capacity: 300,
+        occupied: Math.floor(Math.random() * 150),
+      }));
 
-          const distStr = `${calculateDistance(lat, lng, itemLat, itemLng)} km`;
-          const name = elem.tags?.name || elem.tags?.['name:en'] || `Govt Educational Center #${idx + 1}`;
-
-          return {
-            id: `inst-${elem.id}`,
-            name,
-            lat: itemLat,
-            lng: itemLng,
-            distance: distStr,
-            capacity: 300,
-            occupied: Math.floor(Math.random() * 150),
-            facilities: 'Water, Emergency Shelter, Power',
-          };
-        })
-        .filter(Boolean);
-
-      // Analyze ML safety score for fetched schools/colleges
-      const riskResponse = await API.post('/predict-shelters-risk', { shelters: rawInstitutions });
-      const assessedShelters = riskResponse.data.shelters || [];
-
-      setShelters(assessedShelters);
-      if (assessedShelters.length > 0) {
-        setSelectedShelter(assessedShelters[0]);
+      setShelters(formattedShelters);
+      if (formattedShelters.length > 0) {
+        setSelectedShelter(formattedShelters[0]);
       }
     } catch (err) {
-      console.error('Failed to fetch nearby educational institutions:', err);
+      if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED') {
+        console.error('Failed to fetch nearby shelters:', err);
+      }
     } finally {
-      setLoadingShelters(false);
+      if (!controller.signal.aborted) {
+        setLoadingShelters(false);
+      }
     }
   }, []);
 
-  const handleLocationChange = (lat, lng, message) => {
+  const handleLocationChange = (lat, lng, message, isManual = false) => {
     setUserCoords({ lat, lng });
     setLocationMessage(message);
-    fetchNearbyInstitutions(lat, lng);
+    fetchNearbyInstitutions(lat, lng, isManual);
   };
 
   return (
@@ -271,15 +271,15 @@ export default function Dashboard() {
           {selectedShelter ? (
             <>
               <strong>{selectedShelter.name}</strong>
-              <span>{selectedShelter.distance} away</span>
+              <span style={{ margin: '0 0.5rem' }}>{selectedShelter.distance} away</span>
               <span style={{ color: selectedShelter.is_safe ? '#53b889' : '#d94a5f', fontWeight: 'bold' }}>
-                {selectedShelter.status} (ML Risk: {selectedShelter.risk_level})
+                {selectedShelter.is_safe ? 'Safe Shelter' : 'Unsafe Shelter'} (ML Risk: {selectedShelter.risk_level})
               </span>
             </>
           ) : (
-            <span>Searching 10km radius </span>
+            <span>{loadingShelters ? 'Analyzing risk levels for local shelters...' : 'Searching 10km radius'}</span>
           )}
-          <span className="location-status">{locationMessage}</span>
+          <span className="location-status" style={{ display: 'block', marginTop: '0.25rem' }}>{locationMessage}</span>
         </div>
       </section>
 
@@ -289,12 +289,11 @@ export default function Dashboard() {
           <div>
             <h2>Nearby Relief Shelters (10 km)</h2>
           </div>
-          <span className="section-count">{loadingShelters ? 'Loading...' : `${shelters.length} centers found`}</span>
+          <span className="section-count">{loadingShelters ? 'Evaluating ML Safety...' : `${shelters.length} centers found`}</span>
         </div>
 
         <div className="shelter-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
           {shelters.map((shelter) => {
-            const available = shelter.capacity - shelter.occupied;
             const isSelected = selectedShelter?.id === shelter.id;
             return (
               <button
