@@ -1,6 +1,9 @@
 import React, { useContext, useEffect, useState } from 'react';
 import API from '../api/axios';
 import { AuthContext } from '../context/AuthContext';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
 const ADMIN_GATE_PASSCODE = 'admin123';
 
@@ -11,6 +14,24 @@ const cardStyle = {
   width: '180px',
   textAlign: 'center',
 };
+
+// Fix Leaflet marker icon rendering issues in React
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Interactive map click handler
+function LocationPicker({ onLocationSelect }) {
+  useMapEvents({
+    click(e) {
+      onLocationSelect(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
 
 export default function AdminDashboard() {
   const { user } = useContext(AuthContext);
@@ -99,6 +120,15 @@ export default function AdminDashboard() {
     }
   };
 
+  // Maps click coordinates directly to state
+  const handleMapClick = (lat, lng) => {
+    setNewShelter((prev) => ({
+      ...prev,
+      lat: lat.toFixed(6),
+      lng: lng.toFixed(6),
+    }));
+  };
+
   const handleAddShelter = async (e) => {
     e.preventDefault();
 
@@ -120,6 +150,7 @@ export default function AdminDashboard() {
 
       fetchShelters();
       fetchStats();
+      alert('Shelter successfully registered!');
     } catch (err) {
       console.error('Error adding shelter:', err);
       alert('Unable to add shelter.');
@@ -202,6 +233,9 @@ export default function AdminDashboard() {
       </div>
     );
   }
+
+  const parsedLat = parseFloat(newShelter.lat) || 20.5937;
+  const parsedLng = parseFloat(newShelter.lng) || 78.9629;
 
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
@@ -367,58 +401,90 @@ export default function AdminDashboard() {
         <div>
           <h3>Add and Manage Shelters</h3>
 
-          <form
-            onSubmit={handleAddShelter}
-            style={{
-              marginBottom: '20px',
-              display: 'flex',
-              gap: '10px',
-              flexWrap: 'wrap',
-            }}
-          >
-            <input
-              placeholder="Shelter Name"
-              value={newShelter.name}
-              onChange={(e) =>
-                setNewShelter({ ...newShelter, name: e.target.value })
-              }
-              required
-            />
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: '25px' }}>
+            {/* Form Container */}
+            <form
+              onSubmit={handleAddShelter}
+              style={{
+                flex: '1 1 300px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+              }}
+            >
+              <input
+                placeholder="Shelter Name"
+                value={newShelter.name}
+                onChange={(e) =>
+                  setNewShelter({ ...newShelter, name: e.target.value })
+                }
+                required
+              />
 
-            <input
-              placeholder="Latitude"
-              value={newShelter.lat}
-              onChange={(e) =>
-                setNewShelter({ ...newShelter, lat: e.target.value })
-              }
-              required
-            />
+              <input
+                type="number"
+                step="any"
+                placeholder="Latitude"
+                value={newShelter.lat}
+                onChange={(e) =>
+                  setNewShelter({ ...newShelter, lat: e.target.value })
+                }
+                required
+              />
 
-            <input
-              placeholder="Longitude"
-              value={newShelter.lng}
-              onChange={(e) =>
-                setNewShelter({ ...newShelter, lng: e.target.value })
-              }
-              required
-            />
+              <input
+                type="number"
+                step="any"
+                placeholder="Longitude"
+                value={newShelter.lng}
+                onChange={(e) =>
+                  setNewShelter({ ...newShelter, lng: e.target.value })
+                }
+                required
+              />
 
-            <input
-              placeholder="Total Capacity"
-              type="number"
-              value={newShelter.total_capacity}
-              onChange={(e) =>
-                setNewShelter({
-                  ...newShelter,
-                  total_capacity: e.target.value,
-                })
-              }
-              required
-            />
+              <input
+                placeholder="Total Capacity"
+                type="number"
+                value={newShelter.total_capacity}
+                onChange={(e) =>
+                  setNewShelter({
+                    ...newShelter,
+                    total_capacity: e.target.value,
+                  })
+                }
+                required
+              />
 
-            <button type="submit">Add Shelter</button>
-          </form>
+              <input
+                placeholder="Contact Info"
+                value={newShelter.contact}
+                onChange={(e) =>
+                  setNewShelter({ ...newShelter, contact: e.target.value })
+                }
+              />
 
+              <button type="submit" style={{ cursor: 'pointer', padding: '8px' }}>
+                Add Shelter
+              </button>
+            </form>
+
+            {/* Map Selection Component */}
+            <div style={{ flex: '1 1 400px', height: '300px', borderRadius: '8px', overflow: 'hidden' }}>
+              <p style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: 'bold' }}>
+                Click on map to pin coordinates:
+              </p>
+              <MapContainer center={[parsedLat, parsedLng]} zoom={5} style={{ height: '100%', width: '100%' }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <LocationPicker onLocationSelect={handleMapClick} />
+                {newShelter.lat && newShelter.lng && (
+                  <Marker position={[parseFloat(newShelter.lat), parseFloat(newShelter.lng)]} />
+                )}
+              </MapContainer>
+            </div>
+          </div>
+
+          <h4>Registered Shelters</h4>
           <ul>
             {shelters.map((shelter) => (
               <li key={shelter._id} style={{ marginBottom: '10px' }}>

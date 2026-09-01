@@ -18,9 +18,7 @@ else:
 
 
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculates the exact great-circle distance between two points in km.
-    """
+    """Calculates the exact great-circle distance between two points in km."""
     R = 6371.0  # Earth radius in kilometers
 
     dlat = math.radians(lat2 - lat1)
@@ -45,7 +43,7 @@ def find_nearest_location(latitude, longitude):
 def fetch_live_rainfall_mm_hr(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation&current_weather=true"
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
             hourly_precip = data.get("hourly", {}).get("precipitation", [])
@@ -60,7 +58,7 @@ def get_area_name(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
         headers = {"User-Agent": "AIDisasterResponsePlatform/1.0"}
-        res = requests.get(url, headers=headers, timeout=3)
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code == 200:
             address = res.json().get("address", {})
             return address.get("village") or address.get("town") or address.get("city") or address.get("county") or "Local Zone"
@@ -69,20 +67,23 @@ def get_area_name(lat, lon):
     return "Regional"
 
 
-def fetch_nearby_institutions(lat, lon, radius_m=10000):
+def fetch_nearby_institutions(lat, lon, radius_m=15000):
+    """Fetches schools, hospitals, and community centers via Overpass API with fallbacks."""
     endpoints = [
         "https://overpass-api.de/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
     ]
     
     overpass_query = f"""
-    [out:json][timeout:4];
+    [out:json][timeout:8];
     (
-      node["amenity"="school"](around:5000,{lat},{lon});
-      node["amenity"="hospital"](around:5000,{lat},{lon});
-      way["amenity"="school"](around:5000,{lat},{lon});
+      node["amenity"="school"](around:{radius_m},{lat},{lon});
+      node["amenity"="hospital"](around:{radius_m},{lat},{lon});
+      node["amenity"="community_centre"](around:{radius_m},{lat},{lon});
+      way["amenity"="school"](around:{radius_m},{lat},{lon});
+      way["amenity"="hospital"](around:{radius_m},{lat},{lon});
     );
-    out center 15;
+    out center 25;
     """
     
     headers = {
@@ -93,7 +94,7 @@ def fetch_nearby_institutions(lat, lon, radius_m=10000):
     shelters = []
     for url in endpoints:
         try:
-            response = requests.post(url, data={'data': overpass_query}, headers=headers, timeout=4)
+            response = requests.post(url, data={'data': overpass_query}, headers=headers, timeout=6)
             if response.status_code == 200:
                 data = response.json()
                 for elem in data.get("elements", []):
@@ -108,7 +109,8 @@ def fetch_nearby_institutions(lat, lon, radius_m=10000):
                             "name": name,
                             "lat": float(shelter_lat),
                             "lon": float(shelter_lon),
-                            "type": tags.get("amenity", "school").capitalize()
+                            "type": tags.get("amenity", "school").replace("_", " ").capitalize(),
+                            "is_admin": False
                         })
                 if shelters:
                     return shelters
@@ -117,9 +119,12 @@ def fetch_nearby_institutions(lat, lon, radius_m=10000):
 
     area_label = get_area_name(lat, lon)
     return [
-        {"id": "shelter_dyn_1", "name": f"{area_label} Primary Relief Center", "lat": lat + 0.025, "lon": lon + 0.020, "type": "Relief Center"},
-        {"id": "shelter_dyn_2", "name": f"{area_label} Emergency High School", "lat": lat - 0.035, "lon": lon - 0.030, "type": "School"},
-        {"id": "shelter_dyn_3", "name": f"{area_label} Community Refuge", "lat": lat + 0.045, "lon": lon - 0.040, "type": "Refuge"}
+        {"id": "shelter_dyn_1", "name": f"{area_label} Central Emergency Refuge", "lat": lat + 0.015, "lon": lon + 0.012, "type": "Relief Center", "is_admin": False},
+        {"id": "shelter_dyn_2", "name": f"{area_label} Community High School Shelter", "lat": lat - 0.022, "lon": lon - 0.018, "type": "School Shelter", "is_admin": False},
+        {"id": "shelter_dyn_3", "name": f"{area_label} North District Relief Hall", "lat": lat + 0.031, "lon": lon - 0.025, "type": "Community Refuge", "is_admin": False},
+        {"id": "shelter_dyn_4", "name": f"{area_label} Red Cross Evacuation Hub", "lat": lat - 0.018, "lon": lon + 0.029, "type": "Evacuation Hub", "is_admin": False},
+        {"id": "shelter_dyn_5", "name": f"{area_label} Stadium Disaster Refuge", "lat": lat + 0.038, "lon": lon + 0.032, "type": "Sports Complex", "is_admin": False},
+        {"id": "shelter_dyn_6", "name": f"{area_label} Medical Center Safe Haven", "lat": lat - 0.033, "lon": lon - 0.035, "type": "Hospital", "is_admin": False}
     ]
 
 
@@ -171,22 +176,91 @@ def predict_shelters_risk():
         lat = float(data.get("lat") or data.get("latitude"))
         lng = float(data.get("lng") or data.get("longitude"))
 
+        # 1. Fetch live rainfall rate
         live_rainfall = fetch_live_rainfall_mm_hr(lat, lng)
-        raw_shelters = fetch_nearby_institutions(lat, lng, radius_m=10000)
 
-        evaluated_shelters = []
-        for shelter in raw_shelters:
+        # 2. Extract Admin Shelters directly from PyMongo
+        admin_shelters_raw = []
+        try:
+            from app.extensions import mongo
+            if mongo.db is not None:
+                shelter_docs = list(mongo.db.shelters.find({}))
+                for row in shelter_docs:
+                    s_lat = None
+                    s_lng = None
+
+                    if "latitude" in row:
+                        s_lat = float(row["latitude"])
+                    elif "lat" in row:
+                        s_lat = float(row["lat"])
+
+                    if "longitude" in row:
+                        s_lng = float(row["longitude"])
+                    elif "lng" in row:
+                        s_lng = float(row["lng"])
+                    elif "lon" in row:
+                        s_lng = float(row["lon"])
+
+                    if (s_lat is None or s_lng is None) and "location" in row:
+                        coords = row["location"].get("coordinates", [])
+                        if len(coords) >= 2:
+                            s_lng = float(coords[0])
+                            s_lat = float(coords[1])
+
+                    if s_lat is None or s_lng is None:
+                        continue
+
+                    s_id = str(row.get("_id") or row.get("id", "custom"))
+                    s_name = row.get("name") or row.get("shelter_name") or "Official Relief Shelter"
+                    s_capacity = row.get("capacity") or row.get("total_capacity") or "N/A"
+
+                    dist = calculate_haversine_distance(lat, lng, s_lat, s_lng)
+                    
+                    admin_shelters_raw.append({
+                        "id": f"admin_{s_id}",
+                        "name": f"⭐ {s_name} (Official)",
+                        "lat": s_lat,
+                        "lon": s_lng,
+                        "type": "Admin Registered Shelter",
+                        "capacity": f"{s_capacity} beds" if str(s_capacity).isdigit() else s_capacity,
+                        "distance_km": dist,
+                        "is_admin": True
+                    })
+        except Exception as db_err:
+            print(f"PyMongo query error when fetching shelters: {db_err}")
+
+        # 3. Fetch Overpass dynamic public shelters
+        public_shelters_raw = fetch_nearby_institutions(lat, lng, radius_m=15000)
+
+        # Combine both datasets
+        all_candidate_shelters = admin_shelters_raw + public_shelters_raw
+
+        # 4. Run ML Risk Evaluation
+        admin_evaluated = []
+        public_evaluated = []
+        seen_ids = set()
+
+        for shelter in all_candidate_shelters:
             try:
-                sample = find_nearest_location(shelter["lat"], shelter["lon"])
+                shelter_id = shelter.get("id")
+                if shelter_id in seen_ids:
+                    continue
+                seen_ids.add(shelter_id)
+
+                s_lat = shelter["lat"]
+                s_lon = shelter["lon"]
                 
-                # Calculate precise distance from selected point to shelter
-                distance_km = calculate_haversine_distance(lat, lng, shelter["lat"], shelter["lon"])
-                
+                distance_km = shelter.get(
+                    "distance_km", 
+                    calculate_haversine_distance(lat, lng, s_lat, s_lon)
+                )
+
+                sample = find_nearest_location(s_lat, s_lon)
                 rainfall_intensity = live_rainfall if live_rainfall is not None else float(sample["historical_rainfall_intensity_mm_hr"])
 
                 ml_res = predict_flood_risk(
-                    latitude=shelter["lat"],
-                    longitude=shelter["lon"],
+                    latitude=s_lat,
+                    longitude=s_lon,
                     elevation_m=float(sample["elevation_m"]) if pd.notna(sample["elevation_m"]) else None,
                     land_use=sample["land_use"],
                     soil_group=sample["soil_group"],
@@ -196,25 +270,40 @@ def predict_shelters_risk():
                     historical_rainfall_intensity_mm_hr=rainfall_intensity
                 )
 
-                evaluated_shelters.append({
+                item = {
                     "id": shelter["id"],
                     "name": shelter["name"],
-                    "lat": shelter["lat"],
-                    "lon": shelter["lon"],
-                    "type": shelter["type"],
+                    "lat": s_lat,
+                    "lon": s_lon,
+                    "type": shelter.get("type", "Relief Shelter"),
+                    "capacity": shelter.get("capacity", "N/A"),
                     "distance_km": distance_km,
                     "risk_level": ml_res["risk"],
                     "high_probability": ml_res["high_probability"],
-                    "is_safe": ml_res["risk"].lower() != "high"
-                })
+                    "is_safe": ml_res["risk"].lower() != "high",
+                    "is_admin": shelter.get("is_admin", False)
+                }
+
+                if shelter.get("is_admin"):
+                    admin_evaluated.append(item)
+                else:
+                    public_evaluated.append(item)
+
             except Exception as inner_e:
                 print(f"Shelter evaluation error: {inner_e}")
                 continue
 
+        # Sort each list by distance independently
+        admin_evaluated.sort(key=lambda x: x["distance_km"])
+        public_evaluated.sort(key=lambda x: x["distance_km"])
+
+        # ALWAYS put ALL admin shelters first, then fill remaining slots with public shelters up to 15 total
+        final_shelters = admin_evaluated + public_evaluated[: max(0, 15 - len(admin_evaluated))]
+
         return jsonify({
             "status": "success",
-            "count": len(evaluated_shelters),
-            "data": evaluated_shelters
+            "count": len(final_shelters),
+            "data": final_shelters
         }), 200
 
     except Exception as e:
