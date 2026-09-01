@@ -40,20 +40,19 @@ def create_app() -> Flask:
     bcrypt.init_app(app)
     init_mongo(app)
 
-    # Initialise collections and indexes
+    # Initialise collections and indexes inside app context
     with app.app_context():
         init_collections()
 
-    # Register standard blueprints
+        # Register Incident, Admin & Alert Blueprints with mongo.db bound
+        incident_bp = init_incident_routes(mongo.db)
+        admin_bp = init_admin_routes(mongo.db)
+        alert_bp = init_alert_routes(mongo.db)
+
+    # Register standard blueprints under /api prefix
     app.register_blueprint(health_bp)
     app.register_blueprint(auth_bp, url_prefix='/api')
     app.register_blueprint(flood_bp, url_prefix='/api')
-
-    # Register Incident, Admin & Alert Blueprints with /api prefix
-    incident_bp = init_incident_routes(mongo.db)
-    admin_bp = init_admin_routes(mongo.db)
-    alert_bp = init_alert_routes(mongo.db)
-
     app.register_blueprint(incident_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/api')
     app.register_blueprint(alert_bp, url_prefix='/api')
