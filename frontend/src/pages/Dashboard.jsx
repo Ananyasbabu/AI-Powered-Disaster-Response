@@ -1,28 +1,24 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import API from '../api/axios';
 
-const shelters = [
-  { id: 'central-hall', name: 'Central Community Hall', area: 'Riverfront', distance: '1.2 km', capacity: 250, occupied: 164, facilities: 'Water, power, first aid', lat: 20.61, lng: 78.96, status: 'Open' },
-  { id: 'sunrise-gym', name: 'Sunrise School Gym', area: 'North Hills', distance: '2.8 km', capacity: 320, occupied: 286, facilities: 'Sleeping mats, food', lat: 20.66, lng: 79.04, status: 'Limited' },
-  { id: 'harbor-complex', name: 'Harbor Sports Complex', area: 'East Lakeside', distance: '4.5 km', capacity: 420, occupied: 121, facilities: 'Charging, medical', lat: 20.55, lng: 79.02, status: 'Open' },
-];
+// Utility: Calculate Haversine distance in km
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return (R * c).toFixed(1);
+}
 
-const riskZones = [
-  { name: 'Riverfront', level: 'High', color: '#ef6a55', lat: 20.57, lng: 78.94, radius: 3500 },
-  { name: 'North Hills', level: 'Moderate', color: '#e6b84b', lat: 20.67, lng: 79.02, radius: 3000 },
-  { name: 'Green Valley', level: 'Low', color: '#53b889', lat: 20.53, lng: 78.98, radius: 2800 },
-  { name: 'East Lakeside', level: 'Critical', color: '#d94a5f', lat: 20.57, lng: 79.08, radius: 3400 },
-];
-
-const routeOptions = [
-  { shelterId: 'central-hall', eta: '10 min', distance: '3.4 km', safety: 'Safe', roads: 'Harbor Road -> Civic Avenue' },
-  { shelterId: 'sunrise-gym', eta: '18 min', distance: '6.1 km', safety: 'Caution', roads: 'Civic Avenue -> North Hills Road' },
-  { shelterId: 'harbor-complex', eta: '25 min', distance: '8.7 km', safety: 'Safe', roads: 'East Bypass -> Lakeside Drive' },
-];
-
-function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onLocationChange }) {
+function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterSelect, userCoords, onLocationChange }) {
   const mapElement = useRef(null);
   const mapRef = useRef(null);
   const locationMarker = useRef(null);
@@ -31,7 +27,10 @@ function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onL
   useEffect(() => {
     if (!mapElement.current || mapRef.current) return undefined;
 
-    const map = L.map(mapElement.current).setView([14.2798, 74.4441], 14);
+    const initialLat = userCoords ? userCoords.lat : 14.2798;
+    const initialLng = userCoords ? userCoords.lng : 74.4441;
+
+    const map = L.map(mapElement.current).setView([initialLat, initialLng], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
@@ -44,31 +43,24 @@ function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onL
       if (locationMarker.current) {
         locationMarker.current.setLatLng(point);
       } else {
-        // Create draggable marker so user can refine exact position in emergency
         locationMarker.current = L.marker(point, {
           draggable: true,
-          title: 'Your location (Drag to adjust exact spot)',
+          title: 'Your Location',
         })
           .addTo(map)
-          .bindPopup('<b>Your Location</b><br/>Drag pin to adjust exact point.');
+          .bindPopup('<b>Your Location</b><br/>Drag pin to adjust.');
 
-        locationMarker.current.on('dragend', async (event) => {
+        locationMarker.current.on('dragend', (event) => {
           const newPos = event.target.getLatLng();
-          onLocationChange(`Exact location pinned: ${newPos.lat.toFixed(5)}, ${newPos.lng.toFixed(5)}`);
+          onLocationChange(newPos.lat, newPos.lng, `Exact location pinned: ${newPos.lat.toFixed(5)}, ${newPos.lng.toFixed(5)}`);
         });
       }
 
       if (!tappedMarker.current) {
-        map.setView(point, 16);
+        map.setView(point, 13);
       }
 
-      if (isManual) {
-        onLocationChange(`Exact position set: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-      } else if (accuracy > 1000) {
-        onLocationChange(`Approximate location (${Math.round(accuracy / 1000)}km radius). Tap map or drag pin for exact spot.`);
-      } else {
-        onLocationChange(`High precision GPS locked (Accurate within ${Math.round(accuracy)}m)`);
-      }
+      onLocationChange(lat, lng, `GPS position updated (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
     };
 
     const handleLocationSuccess = (position) => {
@@ -76,28 +68,17 @@ function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onL
       updateLocationPoint(latitude, longitude, accuracy);
     };
 
-    const handleLocationError = (error) => {
-      onLocationChange('GPS signal unavailable. Tap on the map to set your exact location.');
-    };
-
-    // Strict GPS config requiring hardware lock
-    const highAccuracyOptions = {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
+    const handleLocationError = () => {
+      onLocationChange(initialLat, initialLng, 'GPS unavailable. Tap map to select manual location.');
     };
 
     let watchId;
     if (navigator.geolocation) {
-      onLocationChange('Acquiring high-precision GPS lock...');
-      navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError, highAccuracyOptions);
-      watchId = navigator.geolocation.watchPosition(handleLocationSuccess, handleLocationError, highAccuracyOptions);
-    } else {
-      onLocationChange('Geolocation not supported. Click on map to set location.');
+      navigator.geolocation.getCurrentPosition(handleLocationSuccess, handleLocationError, { enableHighAccuracy: true });
+      watchId = navigator.geolocation.watchPosition(handleLocationSuccess, handleLocationError, { enableHighAccuracy: true });
     }
 
-    // Map Tap/Click Event Handler for Exact Pinpointing
-    map.on('click', async (e) => {
+    map.on('click', (e) => {
       const { lat, lng } = e.latlng;
       if (tappedMarker.current) tappedMarker.current.remove();
 
@@ -106,38 +87,8 @@ function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onL
         .bindPopup(`Selected spot: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
         .openPopup();
 
-      onLocationChange(`Selected exact point: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-
-      try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
-        const data = await response.json();
-        const placeName = data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-        onLocationChange(`Selected Location: ${placeName}`);
-        tappedMarker.current.bindPopup(`Selected Location: ${placeName}`).openPopup();
-      } catch (err) {
-        onLocationChange(`Selected Location: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-      }
+      onLocationChange(lat, lng, `Selected point: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
     });
-
-    // Custom Button to trigger precise locate call
-    const locateControl = L.control({ position: 'topright' });
-    locateControl.onAdd = () => {
-      const button = L.DomUtil.create('button', 'locate-button');
-      button.type = 'button';
-      button.textContent = 'Locate me';
-      button.title = 'Get exact GPS location';
-      L.DomEvent.disableClickPropagation(button);
-      L.DomEvent.on(button, 'click', () => {
-        if (tappedMarker.current) {
-          tappedMarker.current.remove();
-          tappedMarker.current = null;
-        }
-        onLocationChange('Requesting exact GPS coordinates...');
-        navigator.geolocation?.getCurrentPosition(handleLocationSuccess, handleLocationError, highAccuracyOptions);
-      });
-      return button;
-    };
-    locateControl.addTo(map);
 
     return () => {
       if (watchId !== undefined) navigator.geolocation?.clearWatch(watchId);
@@ -146,26 +97,67 @@ function LiveMap({ activeLayer, incidents, selectedShelter, onShelterSelect, onL
       locationMarker.current = null;
       tappedMarker.current = null;
     };
-  }, [onLocationChange]);
+  }, []);
 
+  // Update map layer markers for Shelters and ML Risk Status
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
     const layers = [];
-    if (activeLayer !== 'incidents') riskZones.forEach((zone) => layers.push(L.circle([zone.lat, zone.lng], { radius: zone.radius, color: zone.color, fillColor: zone.color, fillOpacity: 0.3, weight: 2 }).bindTooltip(`${zone.name}: ${zone.level} risk`).addTo(map)));
-    if (activeLayer !== 'risk') shelters.forEach((shelter) => layers.push(L.circleMarker([shelter.lat, shelter.lng], { radius: selectedShelter.id === shelter.id ? 11 : 8, color: '#fff', weight: 2, fillColor: '#67d5c7', fillOpacity: 1 }).bindTooltip(shelter.name).on('click', () => onShelterSelect(shelter)).addTo(map)));
-    if (activeLayer !== 'risk') incidents.forEach((incident) => {
-      const coordinates = incident.location?.coordinates;
-      if (Array.isArray(coordinates) && coordinates.length === 2) layers.push(L.circleMarker([coordinates[1], coordinates[0]], { radius: 8, color: '#fff', weight: 2, fillColor: '#ef6a55', fillOpacity: 1 }).bindTooltip(incident.type || 'Verified incident').addTo(map));
-    });
-    return () => layers.forEach((layer) => layer.remove());
-  }, [activeLayer, incidents, onShelterSelect, selectedShelter]);
 
-  return <div ref={mapElement} className="leaflet-map" aria-label="OpenStreetMap showing your current location, shelters, incidents, and flood risks" />;
+    if (activeLayer !== 'risk') {
+      shelters.forEach((shelter) => {
+        const isSelected = selectedShelter?.id === shelter.id;
+        const markerColor = shelter.is_safe ? '#53b889' : '#d94a5f'; // Green for Safe ML score, Red for Unsafe ML score
+
+        const circle = L.circleMarker([shelter.lat, shelter.lng], {
+          radius: isSelected ? 12 : 8,
+          color: isSelected ? '#333' : '#fff',
+          weight: 2,
+          fillColor: markerColor,
+          fillOpacity: 0.9,
+        })
+          .bindTooltip(`<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.status}</b><br/>Distance: ${shelter.distance}`)
+          .on('click', () => onShelterSelect(shelter))
+          .addTo(map);
+
+        layers.push(circle);
+      });
+    }
+
+    if (activeLayer !== 'shelters') {
+      incidents.forEach((incident) => {
+        const coordinates = incident.location?.coordinates;
+        if (Array.isArray(coordinates) && coordinates.length === 2) {
+          layers.push(
+            L.circleMarker([coordinates[1], coordinates[0]], {
+              radius: 8,
+              color: '#fff',
+              weight: 2,
+              fillColor: '#ef6a55',
+              fillOpacity: 1,
+            })
+              .bindTooltip(incident.type || 'Verified Incident')
+              .addTo(map)
+          );
+        }
+      });
+    }
+
+    return () => layers.forEach((layer) => layer.remove());
+  }, [activeLayer, incidents, shelters, selectedShelter, onShelterSelect]);
+
+  return <div ref={mapElement} className="leaflet-map" style={{ height: '450px', width: '100%' }} />;
 }
 
 export default function Dashboard() {
   const [incidents, setIncidents] = useState([]);
+  const [userCoords, setUserCoords] = useState({ lat: 14.2798, lng: 74.4441 });
+  const [shelters, setShelters] = useState([]);
+  const [loadingShelters, setLoadingShelters] = useState(false);
+  const [activeLayer, setActiveLayer] = useState('all');
+  const [selectedShelter, setSelectedShelter] = useState(null);
+  const [locationMessage, setLocationMessage] = useState('Acquiring location...');
 
   useEffect(() => {
     API.get('/incidents/verified')
@@ -173,27 +165,196 @@ export default function Dashboard() {
       .catch((err) => console.error('Error loading incidents:', err));
   }, []);
 
-  const [activeLayer, setActiveLayer] = useState('all');
-  const [selectedShelter, setSelectedShelter] = useState(shelters[0]);
-  const [routeId, setRouteId] = useState(routeOptions[0].shelterId);
-  const [locationMessage, setLocationMessage] = useState('Requesting live location...');
+  // Overpass API fetcher for 10km Nearby Schools/Colleges
+  const fetchNearbyInstitutions = useCallback(async (lat, lng) => {
+    setLoadingShelters(true);
+    try {
+      const radiusMeters = 10000; // 10 km
+      const query = `
+        [out:json][timeout:25];
+        (
+          node["amenity"="school"](around:${radiusMeters},${lat},${lng});
+          node["amenity"="college"](around:${radiusMeters},${lat},${lng});
+          way["amenity"="school"](around:${radiusMeters},${lat},${lng});
+          way["amenity"="college"](around:${radiusMeters},${lat},${lng});
+        );
+        out center 15;
+      `;
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query),
+      });
 
-  const selectedRoute = useMemo(() => routeOptions.find((route) => route.shelterId === routeId) || routeOptions[0], [routeId]);
-  const routeShelter = shelters.find((shelter) => shelter.id === selectedRoute.shelterId);
+      const data = await response.json();
+      const rawInstitutions = (data.elements || [])
+        .map((elem, idx) => {
+          const itemLat = elem.lat || elem.center?.lat;
+          const itemLng = elem.lon || elem.center?.lon;
+          if (!itemLat || !itemLng) return null;
+
+          const distStr = `${calculateDistance(lat, lng, itemLat, itemLng)} km`;
+          const name = elem.tags?.name || elem.tags?.['name:en'] || `Govt Educational Center #${idx + 1}`;
+
+          return {
+            id: `inst-${elem.id}`,
+            name,
+            lat: itemLat,
+            lng: itemLng,
+            distance: distStr,
+            capacity: 300,
+            occupied: Math.floor(Math.random() * 150),
+            facilities: 'Water, Emergency Shelter, Power',
+          };
+        })
+        .filter(Boolean);
+
+      // Analyze ML safety score for fetched schools/colleges
+      const riskResponse = await API.post('/predict-shelters-risk', { shelters: rawInstitutions });
+      const assessedShelters = riskResponse.data.shelters || [];
+
+      setShelters(assessedShelters);
+      if (assessedShelters.length > 0) {
+        setSelectedShelter(assessedShelters[0]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch nearby educational institutions:', err);
+    } finally {
+      setLoadingShelters(false);
+    }
+  }, []);
+
+  const handleLocationChange = (lat, lng, message) => {
+    setUserCoords({ lat, lng });
+    setLocationMessage(message);
+    fetchNearbyInstitutions(lat, lng);
+  };
 
   return (
     <div className="dashboard-page">
-      <section className="dashboard-intro"><div><p className="eyebrow">CITIZEN RESPONSE CENTER</p><h1>Know the ground. Move with confidence.</h1><p className="intro-copy">Live incident reports, safe shelter capacity, and evacuation guidance in one place.</p></div><div className="live-status"><span /> Live response data</div></section>
+      <section className="dashboard-intro">
+        <div>
+          <p className="eyebrow">CITIZEN RESPONSE CENTER</p>
+          <h1>Know the ground. Move with confidence.</h1>
+        </div>
+      </section>
 
-      <section className="dashboard-section map-section"><div className="section-heading"><div><p className="eyebrow">PART A</p><h2>Interactive map</h2></div><div className="layer-controls" aria-label="Map layers">{['all', 'incidents', 'shelters', 'risk'].map((layer) => <button className={activeLayer === layer ? 'layer-button active' : 'layer-button'} key={layer} onClick={() => setActiveLayer(layer)}>{layer[0].toUpperCase() + layer.slice(1)}</button>)}</div></div>
-        <LiveMap activeLayer={activeLayer} incidents={incidents} selectedShelter={selectedShelter} onShelterSelect={setSelectedShelter} onLocationChange={setLocationMessage} />
-        <div className="map-selection"><strong>{selectedShelter.name}</strong><span>{selectedShelter.distance} away</span><span>{selectedShelter.status} | {selectedShelter.capacity - selectedShelter.occupied} spaces available</span><span className="location-status">{locationMessage}</span></div></section>
+      {/* Map Section */}
+      <section className="dashboard-section map-section">
+        <div className="section-heading">
+          <div>
+            <h2>Interactive Map</h2>
+          </div>
+          <div className="layer-controls">
+            {['all', 'incidents', 'shelters', 'risk'].map((layer) => (
+              <button
+                className={activeLayer === layer ? 'layer-button active' : 'layer-button'}
+                key={layer}
+                onClick={() => setActiveLayer(layer)}
+              >
+                {layer[0].toUpperCase() + layer.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">PART B</p><h2>Relief shelters</h2></div><span className="section-count">{shelters.length} locations tracked</span></div><div className="shelter-grid">{shelters.map((shelter) => { const available = shelter.capacity - shelter.occupied; return <button className={selectedShelter.id === shelter.id ? 'shelter-card selected' : 'shelter-card'} key={shelter.id} onClick={() => setSelectedShelter(shelter)}><div className="shelter-card-top"><span className="shelter-icon">+</span><span className={shelter.status === 'Open' ? 'availability open' : 'availability limited'}>{shelter.status}</span></div><h3>{shelter.name}</h3><p>{shelter.area} | {shelter.distance}</p><div className="capacity-label"><span>Capacity</span><strong>{available} spaces left</strong></div><div className="capacity-track"><span style={{ width: `${(shelter.occupied / shelter.capacity) * 100}%` }} /></div><small>{shelter.facilities}</small></button>; })}</div></section>
+        <LiveMap
+          activeLayer={activeLayer}
+          incidents={incidents}
+          shelters={shelters}
+          selectedShelter={selectedShelter}
+          onShelterSelect={setSelectedShelter}
+          userCoords={userCoords}
+          onLocationChange={handleLocationChange}
+        />
 
-      <section className="dashboard-section route-section"><div className="section-heading"><div><p className="eyebrow">PART C</p><h2>Evacuation route</h2></div><span className="route-chip">Route reviewed 2 min ago</span></div><div className="route-layout"><div className="route-summary"><label htmlFor="route-destination">Destination shelter</label><select id="route-destination" value={routeId} onChange={(event) => setRouteId(event.target.value)}>{shelters.map((shelter) => <option value={shelter.id} key={shelter.id}>{shelter.name}</option>)}</select><div className="route-metrics"><div><strong>{selectedRoute.eta}</strong><span>Estimated time</span></div><div><strong>{selectedRoute.distance}</strong><span>Distance</span></div><div><strong className={selectedRoute.safety === 'Safe' ? 'safe-text' : 'caution-text'}>{selectedRoute.safety}</strong><span>Road status</span></div></div><p className="route-path">{selectedRoute.roads}</p><button className="primary-button route-button" onClick={() => setSelectedShelter(routeShelter)}>Set as active destination</button></div><div className="route-visual"><div className="route-line" /><span className="route-pin start-pin">You</span><span className="route-pin end-pin">Safe</span><span className="route-note">Avoid low-lying roads near East Lakeside</span></div></div></section>
+        <div className="map-selection" style={{ marginTop: '1rem' }}>
+          {selectedShelter ? (
+            <>
+              <strong>{selectedShelter.name}</strong>
+              <span>{selectedShelter.distance} away</span>
+              <span style={{ color: selectedShelter.is_safe ? '#53b889' : '#d94a5f', fontWeight: 'bold' }}>
+                {selectedShelter.status} (ML Risk: {selectedShelter.risk_level})
+              </span>
+            </>
+          ) : (
+            <span>Searching 10km radius </span>
+          )}
+          <span className="location-status">{locationMessage}</span>
+        </div>
+      </section>
 
-      <section className="dashboard-section"><div className="section-heading"><div><p className="eyebrow">PART D</p><h2>Flood risk map</h2></div><span className="section-count">Updated from regional forecast</span></div><div className="risk-grid">{riskZones.map((zone) => <div className="risk-card" key={zone.name}><div className="risk-card-heading"><span className="risk-swatch" style={{ backgroundColor: zone.color }} /><strong>{zone.name}</strong><span className="risk-level" style={{ color: zone.color }}>{zone.level}</span></div><div className="risk-bar-track"><span style={{ width: zone.level === 'Critical' ? '92%' : zone.level === 'High' ? '72%' : zone.level === 'Moderate' ? '46%' : '18%', backgroundColor: zone.color }} /></div><small>{zone.level === 'Critical' ? 'Avoid travel and move to higher ground.' : 'Monitor alerts and follow local guidance.'}</small></div>)}</div></section>
+      {/* Shelters Grid */}
+      <section className="dashboard-section">
+        <div className="section-heading">
+          <div>
+            <h2>Nearby Relief Shelters (10 km)</h2>
+          </div>
+          <span className="section-count">{loadingShelters ? 'Loading...' : `${shelters.length} centers found`}</span>
+        </div>
+
+        <div className="shelter-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          {shelters.map((shelter) => {
+            const available = shelter.capacity - shelter.occupied;
+            const isSelected = selectedShelter?.id === shelter.id;
+            return (
+              <button
+                className={`shelter-card ${isSelected ? 'selected' : ''}`}
+                key={shelter.id}
+                onClick={() => setSelectedShelter(shelter)}
+                style={{ textAlign: 'left', border: isSelected ? '2px solid #2574e8' : '1px solid #ccc', padding: '1rem' }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 'bold' }}>{shelter.name}</span>
+                  <span style={{ color: shelter.is_safe ? '#53b889' : '#d94a5f', fontWeight: 'bold' }}>
+                    {shelter.is_safe ? 'Safe' : 'Unsafe'}
+                  </span>
+                </div>
+                <p>{shelter.distance} away</p>
+                <div>
+                  <small>ML Risk Assessment: <strong>{shelter.risk_level} Risk</strong></small>
+                </div>
+                <small>Facilities: {shelter.facilities}</small>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ML Risk Evaluation Table */}
+      <section className="dashboard-section">
+        <div className="section-heading">
+          <div>
+            <h2>ML Model Safety Assessment for Nearby Shelters</h2>
+          </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1rem' }}>
+            <thead>
+              <tr style={{ background: 'rgba(255, 255, 255, 0.05)', textAlign: 'left' }}>
+                <th style={{ padding: '0.75rem' }}>Shelter Name</th>
+                <th style={{ padding: '0.75rem' }}>Distance</th>
+                <th style={{ padding: '0.75rem' }}>ML Risk Level</th>
+                <th style={{ padding: '0.75rem' }}>High Flood Probability</th>
+                <th style={{ padding: '0.75rem' }}>Safety Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shelters.map((s) => (
+                <tr key={s.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                  <td style={{ padding: '0.75rem' }}>{s.name}</td>
+                  <td style={{ padding: '0.75rem' }}>{s.distance}</td>
+                  <td style={{ padding: '0.75rem' }}>{s.risk_level}</td>
+                  <td style={{ padding: '0.75rem' }}>{(s.high_probability * 100).toFixed(2)}%</td>
+                  <td style={{ padding: '0.75rem', color: s.is_safe ? '#53b889' : '#d94a5f', fontWeight: 'bold' }}>
+                    {s.is_safe ? '✓ Safe Shelter' : '⚠️ Unsafe (Avoid)'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

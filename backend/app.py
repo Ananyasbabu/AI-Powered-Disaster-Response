@@ -102,5 +102,52 @@ app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(admin_bp, url_prefix='/api')
 app.register_blueprint(incident_bp, url_prefix='/api')
 
+@app.route('/api/predict-shelters-risk', methods=['POST'])
+def predict_shelters_risk():
+    try:
+        data = request.get_json() or {}
+        shelters_list = data.get('shelters', [])
+
+        if not shelters_list:
+            return jsonify({'status': 'success', 'shelters': []}), 200
+
+        results = []
+        for s in shelters_list:
+            lat = float(s.get('lat', 0))
+            lng = float(s.get('lng', 0))
+            
+            # Predict risk using model defaults/features
+            pred_result = predict_flood_risk(
+                latitude=lat,
+                longitude=lng,
+                elevation_m=float(s.get('elevation_m', 15.0)),
+                land_use='Educational',
+                soil_group='B',
+                drainage_density_km_per_km2=1.5,
+                storm_drain_proximity_m=100.0,
+                storm_drain_type='Open Ditch',
+                historical_rainfall_intensity_mm_hr=45.0
+            )
+
+            # Assign safety classification based on ML prediction
+            risk_label = pred_result['risk']
+            is_safe = risk_label == 'Low'
+
+            results.append({
+                **s,
+                'risk_level': risk_label,
+                'is_safe': is_safe,
+                'status': 'Safe Shelter' if is_safe else ('Caution' if risk_label == 'Medium' else 'High Risk / Unsafe'),
+                'low_probability': pred_result['low_probability'],
+                'medium_probability': pred_result['medium_probability'],
+                'high_probability': pred_result['high_probability']
+            })
+
+        return jsonify({'status': 'success', 'shelters': results}), 200
+
+    except Exception as e:
+        return jsonify({'error': f"Shelter risk assessment failed: {str(e)}"}), 400
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000, use_reloader=False)
+
