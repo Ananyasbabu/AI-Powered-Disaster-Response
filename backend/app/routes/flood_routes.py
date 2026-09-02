@@ -189,30 +189,35 @@ def predict_shelters_risk():
                     s_lat = None
                     s_lng = None
 
-                    if "latitude" in row:
-                        s_lat = float(row["latitude"])
-                    elif "lat" in row:
-                        s_lat = float(row["lat"])
-
-                    if "longitude" in row:
-                        s_lng = float(row["longitude"])
-                    elif "lng" in row:
-                        s_lng = float(row["lng"])
-                    elif "lon" in row:
-                        s_lng = float(row["lon"])
-
-                    if (s_lat is None or s_lng is None) and "location" in row:
-                        coords = row["location"].get("coordinates", [])
-                        if len(coords) >= 2:
-                            s_lng = float(coords[0])
-                            s_lat = float(coords[1])
+                    # Extract coordinates based on MongoDB schema
+                    loc = row.get("location", {})
+                    if isinstance(loc, dict):
+                        s_lat = loc.get("lat") or loc.get("latitude")
+                        s_lng = loc.get("lng") or loc.get("long") or loc.get("longitude")
+                        
+                        # Handle GeoJSON point format fallback [lon, lat]
+                        if (s_lat is None or s_lng is None) and "coordinates" in loc:
+                            coords = loc.get("coordinates", [])
+                            if len(coords) >= 2:
+                                s_lng, s_lat = coords[0], coords[1]
+                    
+                    # Direct field fallback
+                    if s_lat is None:
+                        s_lat = row.get("latitude") or row.get("lat")
+                    if s_lng is None:
+                        s_lng = row.get("longitude") or row.get("lng") or row.get("lon")
 
                     if s_lat is None or s_lng is None:
                         continue
 
-                    s_id = str(row.get("_id") or row.get("id", "custom"))
-                    s_name = row.get("name") or row.get("shelter_name") or "Official Relief Shelter"
-                    s_capacity = row.get("capacity") or row.get("total_capacity") or "N/A"
+                    s_lat = float(s_lat)
+                    s_lng = float(s_lng)
+
+                    s_id = str(row.get("_id"))
+                    s_name = row.get("name") or "Official Relief Shelter"
+                    total_cap = row.get("total_capacity") or row.get("capacity") or "N/A"
+                    occupied = row.get("occupied_beds", 0)
+                    contact = row.get("contact", "")
 
                     dist = calculate_haversine_distance(lat, lng, s_lat, s_lng)
                     
@@ -222,7 +227,8 @@ def predict_shelters_risk():
                         "lat": s_lat,
                         "lon": s_lng,
                         "type": "Admin Registered Shelter",
-                        "capacity": f"{s_capacity} beds" if str(s_capacity).isdigit() else s_capacity,
+                        "capacity": f"{total_cap} beds ({occupied} occupied)",
+                        "contact": contact,
                         "distance_km": dist,
                         "is_admin": True
                     })
