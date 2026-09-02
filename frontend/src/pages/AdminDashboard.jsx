@@ -57,11 +57,11 @@ export default function AdminDashboard() {
     contact: '',
   });
 
-  const [alertForm, setAlertForm] = useState({
-    region: '',
-    severity: 'CRITICAL',
-    message: '',
-  });
+  // const [alertForm, setAlertForm] = useState({
+  //   region: '',
+  //   severity: 'CRITICAL',
+  //   message: '',
+  // });
 
   useEffect(() => {
     if (isVerified) {
@@ -248,7 +248,7 @@ export default function AdminDashboard() {
         <button onClick={() => setActiveTab('dashboard')}>Dashboard</button>
         <button onClick={() => setActiveTab('incidents')}>Verify Incidents</button>
         <button onClick={() => setActiveTab('shelters')}>Manage Shelters</button>
-        <button onClick={() => setActiveTab('alerts')}>Emergency Broadcast</button>
+        {/* <button onClick={() => setActiveTab('alerts')}>Emergency Broadcast</button> */}
       </div>
 
       <hr />
