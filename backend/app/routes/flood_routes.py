@@ -1,22 +1,51 @@
+# Save as flood_routes.py inside your Blueprint/routes folder
+
 import math
+import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from flask import Blueprint, jsonify, request
+
 import pandas as pd
 import requests
+from flask import Blueprint, jsonify, request, current_app
+from werkzeug.utils import secure_filename
 
-from app import db
-from app.models.shelter import Shelter  # Adjust import path if shelter model is placed elsewhere
 from predict import predict_flood_risk
 
 flood_bp = Blueprint("flood", __name__)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_PATH = BASE_DIR / "data" / "flood_test_data.csv"
+UPLOAD_FOLDER = BASE_DIR / "uploads"
+
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 if DATA_PATH.exists():
     df = pd.read_csv(DATA_PATH)
 else:
     df = pd.DataFrame()
+
+
+def get_db():
+    """Helper to retrieve the PyMongo database instance safely from Flask's current_app or imports."""
+    if "DB" in current_app.config:
+        return current_app.config["DB"]
+    if "MONGO_DB" in current_app.config:
+        return current_app.config["MONGO_DB"]
+    try:
+        from app import db
+        return db
+    except Exception:
+        return None
+
+
+def allowed_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
 
 def calculate_haversine_distance(lat1, lon1, lat2, lon2):
@@ -252,6 +281,8 @@ def predict_flood():
 
 @flood_bp.route("/predict-shelters-risk", methods=["POST"])
 def predict_shelters_risk():
+    db = get_db()
+
     try:
         data = request.get_json(silent=True) or {}
         lat = float(data.get("lat") or data.get("latitude"))
@@ -260,29 +291,39 @@ def predict_shelters_risk():
         # 1. Fetch live rainfall rate
         live_rainfall = fetch_live_rainfall_mm_hr(lat, lng)
 
-        # 2. Extract Admin Shelters directly via SQLAlchemy Model
+        # 2. Extract Admin Shelters directly via PyMongo Collection
         admin_shelters_raw = []
-        try:
-            db_shelters = Shelter.query.all()
-            for s in db_shelters:
-                dist = calculate_haversine_distance(lat, lng, s.lat, s.lng)
-                total_cap = s.capacity if s.capacity is not None else "N/A"
-                occ = getattr(s, "occupied_beds", 0) or 0
-                contact = getattr(s, "contact", "") or ""
+        if db is not None:
+            try:
+                db_shelters = list(db.shelters.find({}))
+                for s in db_shelters:
+                    s_lat = float(
+                        s.get("location", {}).get("coordinates", [0, 0])[1]
+                        or s.get("lat", 0)
+                    )
+                    s_lng = float(
+                        s.get("location", {}).get("coordinates", [0, 0])[0]
+                        or s.get("lng", 0)
+                    )
 
-                admin_shelters_raw.append({
-                    "id": f"admin_{s.id}",
-                    "name": f"⭐ {s.name} (Official)",
-                    "lat": float(s.lat),
-                    "lon": float(s.lng),
-                    "type": "Admin Registered Shelter",
-                    "capacity": f"{total_cap} beds ({occ} occupied)",
-                    "contact": contact,
-                    "distance_km": dist,
-                    "is_admin": True,
-                })
-        except Exception as db_err:
-            print(f"SQLAlchemy query error when fetching shelters: {db_err}")
+                    dist = calculate_haversine_distance(lat, lng, s_lat, s_lng)
+                    total_cap = s.get("total_beds") or s.get("capacity", "N/A")
+                    occ = s.get("occupied_beds", 0)
+                    contact = s.get("contact", "")
+
+                    admin_shelters_raw.append({
+                        "id": f"admin_{str(s.get('_id'))}",
+                        "name": f"⭐ {s.get('name', 'Shelter')} (Official)",
+                        "lat": s_lat,
+                        "lon": s_lng,
+                        "type": "Admin Registered Shelter",
+                        "capacity": f"{total_cap} beds ({occ} occupied)",
+                        "contact": contact,
+                        "distance_km": dist,
+                        "is_admin": True,
+                    })
+            except Exception as db_err:
+                print(f"MongoDB query error when fetching shelters: {db_err}")
 
         # 3. Fetch Overpass dynamic public shelters
         public_shelters_raw = fetch_nearby_institutions(
@@ -381,4 +422,89 @@ def predict_shelters_risk():
         )
 
     except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@flood_bp.route("/shelters/report", methods=["POST"])
+def report_shelter():
+    db = get_db()
+    if db is None:
+        return jsonify({"status": "error", "message": "Database connection unavailable."}), 500
+
+    try:
+        # Support both multipart/form-data and JSON inputs
+        data = request.form if request.form else (request.get_json(silent=True) or {})
+
+        name = data.get("name") or data.get("shelter_name")
+        address = data.get("address", "")
+        facilities = data.get("facilities", "")
+
+        if not name:
+            return jsonify({
+                "status": "error",
+                "message": "Shelter name is required."
+            }), 400
+
+        try:
+            total_beds = int(data.get("total_beds", 100))
+            available_beds = int(data.get("available_beds", total_beds))
+            
+            # Robust extraction matching UI field names ('latitude' and 'longitude')
+            raw_lat = data.get("latitude") or data.get("lat") or 0
+            raw_lng = data.get("longitude") or data.get("lng") or data.get("lon") or 0
+            
+            lat = float(raw_lat)
+            lng = float(raw_lng)
+        except (ValueError, TypeError) as parse_err:
+            print(f"Input Parsing Error: {parse_err}")
+            return jsonify({
+                "status": "error",
+                "message": "Invalid numeric input for beds or coordinates."
+            }), 400
+
+        image_url = None
+        if "image" in request.files:
+            file = request.files["image"]
+            if file and file.filename != "" and allowed_file(file.filename):
+                original_filename = secure_filename(file.filename)
+                filename = f"shelter_{uuid.uuid4().hex}_{original_filename}"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filepath)
+                image_url = f"uploads/{filename}"
+
+        created_at_dt = datetime.now(timezone.utc)
+
+        shelter_doc = {
+            "name": name,
+            "address": address,
+            "facilities": facilities,
+            "total_beds": total_beds,
+            "available_beds": available_beds,
+            "occupied_beds": max(0, total_beds - available_beds),
+            "location": {
+                "type": "Point",
+                "coordinates": [lng, lat]
+            },
+            "lat": lat,
+            "lng": lng,
+            "image_url": image_url,
+            "risk_level": "Low",
+            "created_at": created_at_dt
+        }
+
+        inserted_id = db.shelters.insert_one(shelter_doc).inserted_id
+
+        # Return a sanitized dictionary for standard JSON serialization
+        response_data = dict(shelter_doc)
+        response_data["_id"] = str(inserted_id)
+        response_data["created_at"] = created_at_dt.isoformat()
+
+        return jsonify({
+            "status": "success",
+            "message": "Shelter submitted successfully.",
+            "data": response_data
+        }), 201
+
+    except Exception as e:
+        print(f"Error in /shelters/report: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500

@@ -14,6 +14,7 @@ from app.routes.flood_routes import flood_bp
 load_dotenv()
 
 app = Flask(__name__)
+app.url_map.strict_slashes = False
 CORS(app, supports_credentials=True)
 
 bcrypt.init_app(app)
@@ -21,6 +22,9 @@ bcrypt.init_app(app)
 app.config['MONGO_URI'] = os.getenv("MONGO_URI", "mongodb://localhost:27017/disaster_guard")
 mongo = PyMongo(app)
 db = mongo.db
+
+# Store db instance on app.config or attach it so flood_bp can access it cleanly
+app.config['DB'] = db
 
 # --- ML MODEL INTEGRATION ---
 MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
@@ -30,7 +34,6 @@ PREPROCESSOR_PATH = os.path.join(MODELS_DIR, 'flood_risk_preprocessor.pkl')
 ml_model = None
 preprocessor = None
 
-# 1. Load XGBoost Model
 try:
     if os.path.exists(MODEL_PATH):
         with open(MODEL_PATH, 'rb') as f:
@@ -41,7 +44,6 @@ try:
 except Exception as e:
     print(f"Error loading ML model: {e}")
 
-# 2. Load Preprocessor
 try:
     if os.path.exists(PREPROCESSOR_PATH):
         with open(PREPROCESSOR_PATH, 'rb') as f:

@@ -31,6 +31,10 @@ def allowed_file(filename):
 def init_incident_routes(db):
     incident_bp = Blueprint('incident_bp', __name__)
 
+    # -------------------------------------------------------------------------
+    # INCIDENT REPORTING & RETRIEVAL
+    # -------------------------------------------------------------------------
+
     @incident_bp.route('/incidents/report', methods=['POST'])
     def report_incident():
         if 'image' not in request.files:
@@ -205,6 +209,78 @@ def init_incident_routes(db):
         return jsonify({
             "status": "success",
             "data": incidents
+        }), 200
+
+    # -------------------------------------------------------------------------
+    # SHELTER MANAGEMENT & PREDICTION
+    # -------------------------------------------------------------------------
+
+    @incident_bp.route('/shelters/report', methods=['POST'])
+    def report_shelter():
+        name = request.form.get('name')
+        address = request.form.get('address', '')
+        facilities = request.form.get('facilities', '')
+        
+        try:
+            total_beds = int(request.form.get('total_beds', 100))
+            available_beds = int(request.form.get('available_beds', total_beds))
+            latitude = float(request.form.get('lat') or request.form.get('latitude', 0))
+            longitude = float(request.form.get('lon') or request.form.get('lng') or request.form.get('longitude', 0))
+        except (ValueError, TypeError):
+            return jsonify({
+                "status": "error",
+                "message": "Invalid numeric input for beds or coordinates."
+            }), 400
+
+        image_url = None
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and file.filename != '' and allowed_file(file.filename):
+                original_filename = secure_filename(file.filename)
+                filename = f"shelter_{uuid.uuid4().hex}_{original_filename}"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filepath)
+                image_url = f"uploads/{filename}"
+
+        shelter_doc = {
+            "name": name,
+            "address": address,
+            "facilities": facilities,
+            "total_beds": total_beds,
+            "available_beds": available_beds,
+            "location": {
+                "type": "Point",
+                "coordinates": [longitude, latitude]
+            },
+            "image_url": image_url,
+            "risk_level": "Low",
+            "created_at": datetime.utcnow()
+        }
+
+        inserted_id = db.shelters.insert_one(shelter_doc).inserted_id
+        shelter_doc["_id"] = str(inserted_id)
+
+        return jsonify({
+            "status": "success",
+            "message": "Shelter reported successfully.",
+            "data": shelter_doc
+        }), 201
+
+    @incident_bp.route('/predict-shelters-risk', methods=['POST'])
+    def predict_shelter_risk():
+        payload = request.get_json() or {}
+        user_lat = payload.get("lat")
+        user_lng = payload.get("lng")
+
+        shelters = list(db.shelters.find({}))
+        for shelter in shelters:
+            shelter['_id'] = str(shelter['_id'])
+            if 'risk_level' not in shelter:
+                shelter['risk_level'] = 'Low'
+
+        return jsonify({
+            "status": "success",
+            "shelters": shelters
         }), 200
 
     return incident_bp
