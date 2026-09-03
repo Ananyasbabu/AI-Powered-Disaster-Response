@@ -10,6 +10,7 @@ from app.routes.auth import auth_bp
 from app.routes.admin_routes import admin_bp
 from app.routes.incident_routes import init_incident_routes
 from app.routes.flood_routes import flood_bp
+from app.routes.shelter_routes import shelter_bp
 
 load_dotenv()
 
@@ -72,6 +73,7 @@ app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(admin_bp, url_prefix='/api')
 app.register_blueprint(incident_bp, url_prefix='/api')
 app.register_blueprint(flood_bp, url_prefix='/api')
+from app.routes.shelter_routes import shelter_bp
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, use_reloader=False)

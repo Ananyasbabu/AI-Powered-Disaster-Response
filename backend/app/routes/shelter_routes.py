@@ -1,110 +1,130 @@
 import os
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
-from app.models.shelter import Shelter
+from app.models import Shelter  # Imports your MongoEngine Shelter model
 
-shelter_bp = Blueprint("shelter_bp", __name__)
+shelter_bp = Blueprint('shelter_bp', __name__)
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-@shelter_bp.route("/shelters", methods=["POST"])
-def add_shelter():
+@shelter_bp.route('/shelters/report', methods=['POST'])
+def report_shelter():
+    """Report/Add a new shelter place."""
     try:
-        # Support both multipart/form-data and application/json payloads
-        if request.is_json:
-            data = request.get_json() or {}
-            name = data.get("name")
-            location_name = data.get("location_name")
-            lat_val = data.get("latitude") if data.get("latitude") is not None else data.get("lat")
-            lng_val = data.get("longitude") if data.get("longitude") is not None else data.get("lng")
-            total_beds_val = data.get("total_beds", 0)
-            available_beds_val = data.get("available_beds", 0)
-            facilities = data.get("facilities", "Water, Emergency Shelter, Power")
-            role = data.get("role") or data.get("created_by_role", "user")
-            image_url = data.get("image_url")
-        else:
-            name = request.form.get("name")
-            location_name = request.form.get("location_name")
-            lat_val = request.form.get("latitude") or request.form.get("lat")
-            lng_val = request.form.get("longitude") or request.form.get("lng")
-            total_beds_val = request.form.get("total_beds", 0)
-            available_beds_val = request.form.get("available_beds", 0)
-            facilities = request.form.get("facilities", "Water, Emergency Shelter, Power")
-            role = request.form.get("role") or request.form.get("created_by_role", "user")
+        # Extract form text parameters
+        name = request.form.get('name')
+        lat = request.form.get('lat') or request.form.get('latitude')
+        lng = request.form.get('lng') or request.form.get('lon') or request.form.get('longitude')
+        location_name = request.form.get('address') or request.form.get('location_name', '')
+        facilities = request.form.get('facilities', 'Water, Emergency Shelter, Power')
 
-            image_file = request.files.get("image")
-            image_url = None
+        # Validate required fields
+        if not name or lat is None or lng is None:
+            return jsonify({'message': 'Shelter name, latitude, and longitude are required.'}), 400
 
-            if image_file and image_file.filename != "":
-                filename = secure_filename(image_file.filename)
-                upload_folder = current_app.config.get("UPLOAD_FOLDER", "uploads")
+        try:
+            latitude = float(lat)
+            longitude = float(lng)
+            total_beds = int(request.form.get('total_beds', 100))
+            available_beds = int(request.form.get('available_beds', 100))
+        except ValueError:
+            return jsonify({'message': 'Latitude, Longitude, and Bed counts must be valid numbers.'}), 400
+
+        # Handle file upload if image is provided
+        image_url = None
+        if 'image' in request.files:
+            file = request.files['image']
+            if file and file.filename != '' and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                upload_folder = os.path.join(current_app.root_path, 'static', 'uploads')
                 os.makedirs(upload_folder, exist_ok=True)
-                upload_path = os.path.join(upload_folder, filename)
-                image_file.save(upload_path)
-                image_url = f"/uploads/{filename}"
+                
+                save_path = os.path.join(upload_folder, filename)
+                file.save(save_path)
+                image_url = f"/static/uploads/{filename}"
 
-        # Validate mandatory field presence
-        if not name or lat_val is None or lng_val is None:
-            return jsonify({
-                "success": False,
-                "message": "Missing required fields: name, latitude/lat, or longitude/lng."
-            }), 400
-
-        latitude = float(lat_val)
-        longitude = float(lng_val)
-        total_beds = int(total_beds_val)
-        available_beds = int(available_beds_val) if available_beds_val else total_beds
-
-        # Initialize MongoEngine Document instance
+        # Instantiating MongoEngine document
         new_shelter = Shelter(
-            name=name,
-            location_name=location_name,
+            name=name.strip(),
+            location_name=location_name.strip(),
             latitude=latitude,
             longitude=longitude,
             total_beds=total_beds,
             available_beds=available_beds,
-            facilities=facilities,
+            facilities=facilities.strip(),
             image_url=image_url,
-            created_by_role=role,
+            created_by_role='user'
         )
         new_shelter.save()
 
-        shelter_dict = new_shelter.to_dict()
-
         return jsonify({
-            "success": True,
-            "message": "Shelter added successfully",
-            "data": shelter_dict,
-            "shelter": shelter_dict
+            'status': 'success',
+            'message': 'Shelter registered successfully',
+            'data': new_shelter.to_dict()
         }), 201
 
-    except (ValueError, TypeError) as err:
-        return jsonify({
-            "success": False,
-            "message": "Invalid numeric input type for coordinates or bed counts.",
-            "error": str(err)
-        }), 400
-    except Exception as err:
-        return jsonify({
-            "success": False,
-            "message": "Internal server error occurred while processing shelter request.",
-            "error": str(err)
-        }), 500
+    except Exception as e:
+        print(f"Error in /shelters/report: {e}")
+        return jsonify({'message': f'Failed to process shelter report: {str(e)}'}), 500
 
 
-@shelter_bp.route("/shelters", methods=["GET"])
+@shelter_bp.route('/shelters', methods=['GET'])
 def get_shelters():
+    """Fetch all reported shelters."""
     try:
-        # Fetch documents sorted by created_at using MongoEngine syntax
-        shelters = Shelter.objects.order_by("-created_at")
-        formatted_shelters = [s.to_dict() for s in shelters]
+        shelters = Shelter.objects()
+        return jsonify([shelter.to_dict() for shelter in shelters]), 200
+    except Exception as e:
+        print(f"MongoDB query error when fetching shelters: {e}")
+        return jsonify({'message': str(e)}), 500
 
-        return jsonify({
-            "success": True,
-            "data": formatted_shelters
-        }), 200
-    except Exception as err:
-        return jsonify({
-            "success": False,
-            "message": "Failed to fetch shelters",
-            "error": str(err)
-        }), 500
+
+@shelter_bp.route('/shelters/<shelter_id>', methods=['GET'])
+def get_shelter_by_id(shelter_id):
+    """Fetch a single shelter by ID."""
+    try:
+        shelter = Shelter.objects.get(id=shelter_id)
+        return jsonify(shelter.to_dict()), 200
+    except Shelter.DoesNotExist:
+        return jsonify({'message': 'Shelter not found.'}), 404
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+
+@shelter_bp.route('/shelters/<shelter_id>/risk', methods=['PATCH', 'PUT'])
+def update_shelter_risk(shelter_id):
+    """Update risk level and status of a shelter."""
+    try:
+        data = request.get_json() or {}
+        shelter = Shelter.objects.get(id=shelter_id)
+
+        if 'risk_level' in data:
+            shelter.risk_level = data['risk_level']
+        if 'status' in data:
+            shelter.status = data['status']
+        if 'available_beds' in data:
+            shelter.available_beds = int(data['available_beds'])
+
+        shelter.save()
+        return jsonify({'status': 'success', 'data': shelter.to_dict()}), 200
+    except Shelter.DoesNotExist:
+        return jsonify({'message': 'Shelter not found.'}), 404
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+
+@shelter_bp.route('/shelters/<shelter_id>', methods=['DELETE'])
+def delete_shelter(shelter_id):
+    """Delete a shelter by ID."""
+    try:
+        shelter = Shelter.objects.get(id=shelter_id)
+        shelter.delete()
+        return jsonify({'status': 'success', 'message': 'Shelter deleted successfully.'}), 200
+    except Shelter.DoesNotExist:
+        return jsonify({'message': 'Shelter not found.'}), 404
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
