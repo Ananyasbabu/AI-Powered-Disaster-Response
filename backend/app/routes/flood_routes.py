@@ -1,7 +1,6 @@
-# Save as flood_routes.py inside your Blueprint/routes folder
-
 import math
 import os
+import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -427,40 +426,54 @@ def predict_shelters_risk():
 
 @flood_bp.route("/shelters/report", methods=["POST"])
 def report_shelter():
-    db = get_db()
-    if db is None:
-        return jsonify({"status": "error", "message": "Database connection unavailable."}), 500
-
     try:
-        # Support both multipart/form-data and JSON inputs
-        data = request.form if request.form else (request.get_json(silent=True) or {})
+        db = get_db()
+        print(f"DEBUG: Database connection acquired: {db}")
 
-        name = data.get("name") or data.get("shelter_name")
-        address = data.get("address", "")
-        facilities = data.get("facilities", "")
+        if db is None:
+            print("ERROR: db is None in /shelters/report")
+            return jsonify({
+                "status": "error",
+                "message": "Database connection unavailable."
+            }), 500
 
+        # Extract data cleanly whether passed as Form Data or JSON Payload
+        if request.form:
+            data = request.form.to_dict()
+        else:
+            data = request.get_json(silent=True) or {}
+
+        print(f"DEBUG Form Keys: {list(request.form.keys())}")
+        print(f"DEBUG Files Received: {list(request.files.keys())}")
+
+        name = data.get("name") or data.get("shelter_name") or data.get("title")
         if not name:
             return jsonify({
                 "status": "error",
                 "message": "Shelter name is required."
             }), 400
 
-        try:
-            total_beds = int(data.get("total_beds", 100))
-            available_beds = int(data.get("available_beds", total_beds))
-            
-            # Robust extraction matching UI field names ('latitude' and 'longitude')
-            raw_lat = data.get("latitude") or data.get("lat") or 0
-            raw_lng = data.get("longitude") or data.get("lng") or data.get("lon") or 0
-            
-            lat = float(raw_lat)
-            lng = float(raw_lng)
-        except (ValueError, TypeError) as parse_err:
-            print(f"Input Parsing Error: {parse_err}")
-            return jsonify({
-                "status": "error",
-                "message": "Invalid numeric input for beds or coordinates."
-            }), 400
+        address = data.get("address", "")
+        facilities = data.get("facilities", "")
+
+        # Safe Parsing Helpers to avoid empty string or bad type exceptions
+        def safe_int(val, default):
+            try:
+                return int(val) if val is not None and str(val).strip() != "" else default
+            except (ValueError, TypeError):
+                return default
+
+        def safe_float(val, default):
+            try:
+                return float(val) if val is not None and str(val).strip() != "" else default
+            except (ValueError, TypeError):
+                return default
+
+        total_beds = safe_int(data.get("total_beds") or data.get("totalBeds"), 100)
+        available_beds = safe_int(data.get("available_beds") or data.get("availableBeds"), total_beds)
+
+        lat = safe_float(data.get("latitude") or data.get("lat"), 0.0)
+        lng = safe_float(data.get("longitude") or data.get("lng") or data.get("lon"), 0.0)
 
         image_url = None
         if "image" in request.files:
@@ -492,11 +505,12 @@ def report_shelter():
             "created_at": created_at_dt
         }
 
-        inserted_id = db.shelters.insert_one(shelter_doc).inserted_id
+        # Insert to MongoDB
+        insert_result = db.shelters.insert_one(shelter_doc)
+        print(f"DEBUG: Inserted document ID: {insert_result.inserted_id}")
 
-        # Return a sanitized dictionary for standard JSON serialization
         response_data = dict(shelter_doc)
-        response_data["_id"] = str(inserted_id)
+        response_data["_id"] = str(insert_result.inserted_id)
         response_data["created_at"] = created_at_dt.isoformat()
 
         return jsonify({
@@ -506,5 +520,7 @@ def report_shelter():
         }), 201
 
     except Exception as e:
-        print(f"Error in /shelters/report: {e}")
+        print("\n================ EXCEPTION IN /shelters/report ================")
+        traceback.print_exc()
+        print("=================================================================\n")
         return jsonify({"status": "error", "message": str(e)}), 500
