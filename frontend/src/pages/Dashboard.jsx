@@ -453,8 +453,23 @@ export default function Dashboard() {
         lng: s.lon || s.lng,
         distance: `${calculateDistance(lat, lng, s.lat, s.lon || s.lng)} km`,
         facilities: s.facilities || 'Water, Emergency Shelter, Power',
-        total_beds: s.total_beds || s.capacity || 300,
-        available_beds: s.available_beds || (s.capacity ? s.capacity - (s.occupied_beds || 0) : 150),
+        total_beds:
+  s.total_beds !== undefined && s.total_beds !== null
+    ? Number(s.total_beds)
+    : null,
+
+available_beds:
+  s.available_beds !== undefined && s.available_beds !== null
+    ? Number(s.available_beds)
+    : null,
+
+occupied_beds:
+  s.occupied_beds !== undefined && s.occupied_beds !== null
+    ? Number(s.occupied_beds)
+    : 0,
+
+location_name: s.location_name || '',
+created_at: s.created_at || null,
       }));
 
       setShelters(formattedShelters);
@@ -490,7 +505,32 @@ export default function Dashboard() {
     setShelters((prevShelters) => [formattedNewShelter, ...prevShelters]);
     setSelectedShelter(formattedNewShelter);
   };
+  
+  const handleBedsChanged = (updatedShelter) => {
+  setShelters((currentShelters) =>
+    currentShelters.map((item) =>
+      item.id === `admin_${updatedShelter.id}` || item.id === updatedShelter.id
+        ? {
+            ...item,
+            ...updatedShelter,
+            id: `admin_${updatedShelter.id}`,
+            is_admin: true,
+          }
+        : item
+    )
+  );
 
+  setSelectedShelter((current) =>
+    current?.id === `admin_${updatedShelter.id}` || current?.id === updatedShelter.id
+      ? {
+          ...current,
+          ...updatedShelter,
+          id: `admin_${updatedShelter.id}`,
+          is_admin: true,
+        }
+      : current
+  );
+};
   const handleLocationChange = useCallback(
     (lat, lng, message, isManual = false) => {
       setUserCoords({ lat, lng });
@@ -667,6 +707,7 @@ export default function Dashboard() {
               shelter={shelter}
               isSelected={selectedShelter?.id === shelter.id}
               onSelect={setSelectedShelter}
+              onBedsChanged={handleBedsChanged}
             />
           ))}
         </div>
