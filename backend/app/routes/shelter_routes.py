@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from app.models import Shelter  # Imports MongoEngine Shelter model
@@ -47,9 +48,10 @@ def report_shelter():
                 
                 save_path = os.path.join(upload_folder, filename)
                 file.save(save_path)
-                image_url = f"uploads/{filename}"
+                image_url = f"/uploads/{filename}"
 
-        # Instantiating MongoEngine document with both root coordinates & GeoJSON location
+        # Explicitly pass created_at timestamp during document instantiation
+        created_timestamp = datetime.now(timezone.utc)
         new_shelter = Shelter(
             name=name.strip(),
             location_name=location_name.strip(),
@@ -63,14 +65,19 @@ def report_shelter():
             available_beds=available_beds,
             facilities=facilities.strip(),
             image_url=image_url,
-            created_by_role='user'
+            created_by_role='user',
+            created_at=created_timestamp
         )
         new_shelter.save()
+
+        # Format dictionary payload with ISO string for the timestamp
+        res_data = new_shelter.to_dict() if hasattr(new_shelter, 'to_dict') else {}
+        res_data['created_at'] = created_timestamp.isoformat()
 
         return jsonify({
             'status': 'success',
             'message': 'Shelter registered successfully',
-            'data': new_shelter.to_dict()
+            'data': res_data
         }), 201
 
     except Exception as e:
@@ -80,10 +87,24 @@ def report_shelter():
 
 @shelter_bp.route('/shelters', methods=['GET'])
 def get_shelters():
-    """Fetch all reported shelters."""
+    """Fetch all reported shelters with formatted ISO creation timestamps."""
     try:
         shelters = Shelter.objects()
-        return jsonify([shelter.to_dict() for shelter in shelters]), 200
+        results = []
+        for shelter in shelters:
+            data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+            
+            # Format explicit created_at or fallback to Mongo ObjectId timestamp
+            if hasattr(shelter, 'created_at') and shelter.created_at:
+                data['created_at'] = shelter.created_at.isoformat()
+            elif hasattr(shelter, 'id') and hasattr(shelter.id, 'generation_time'):
+                data['created_at'] = shelter.id.generation_time.isoformat()
+            else:
+                data['created_at'] = None
+
+            results.append(data)
+
+        return jsonify(results), 200
     except Exception as e:
         print(f"MongoDB query error when fetching shelters: {e}")
         return jsonify({'message': str(e)}), 500
@@ -94,7 +115,14 @@ def get_shelter_by_id(shelter_id):
     """Fetch a single shelter by ID."""
     try:
         shelter = Shelter.objects.get(id=shelter_id)
-        return jsonify(shelter.to_dict()), 200
+        data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+        
+        if hasattr(shelter, 'created_at') and shelter.created_at:
+            data['created_at'] = shelter.created_at.isoformat()
+        elif hasattr(shelter, 'id') and hasattr(shelter.id, 'generation_time'):
+            data['created_at'] = shelter.id.generation_time.isoformat()
+            
+        return jsonify(data), 200
     except Shelter.DoesNotExist:
         return jsonify({'message': 'Shelter not found.'}), 404
     except Exception as e:
@@ -116,7 +144,12 @@ def update_shelter_risk(shelter_id):
             shelter.available_beds = int(data['available_beds'])
 
         shelter.save()
-        return jsonify({'status': 'success', 'data': shelter.to_dict()}), 200
+        
+        res_data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+        if hasattr(shelter, 'created_at') and shelter.created_at:
+            res_data['created_at'] = shelter.created_at.isoformat()
+
+        return jsonify({'status': 'success', 'data': res_data}), 200
     except Shelter.DoesNotExist:
         return jsonify({'message': 'Shelter not found.'}), 404
     except Exception as e:

@@ -2,26 +2,12 @@ import React from 'react';
 
 // Formatter to convert any valid date/timestamp string to an exact formatted string
 function formatPostTime(dateString) {
-  if (!dateString) {
-    // Fallback to current date and time if no creation date is present in the record
-    return new Date().toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    });
-  }
+  if (!dateString) return "Just now";
 
   const postDate = new Date(dateString);
 
-  // Check if date parsing succeeded
-  if (isNaN(postDate.getTime())) {
-    return dateString; // Return as-is if backend sends pre-formatted text
-  }
+  if (isNaN(postDate.getTime())) return "Just now";
 
-  // Exact date/time formatting: e.g. "03 Sep 2026, 01:12 PM"
   return postDate.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
@@ -42,11 +28,11 @@ const ShelterCard = ({ shelter, isSelected, onSelect }) => {
   const totalBeds = shelter.total_beds ?? shelter.capacity ?? 'N/A';
 
   // Format exact creation timestamp
-  const displayTime = formatPostTime(shelter.created_at || shelter.timestamp || shelter.created_time);
+  const displayTime = formatPostTime(shelter.created_at || shelter.timestamp || shelter.created_time || shelter.uploaded_at);
 
   return (
     <div
-      onClick={() => onSelect(shelter)}
+      onClick={() => onSelect && onSelect(shelter)}
       style={{
         backgroundColor: '#0f172a',
         color: '#ffffff',
