@@ -1,34 +1,95 @@
-import React from 'react';
+import { useState } from 'react';
+import API from '../api/axios';
 
-// Formatter to convert any valid date/timestamp string to an exact formatted string
 function formatPostTime(dateString) {
-  if (!dateString) return "Just now";
+  if (!dateString) return 'Not available';
 
-  const postDate = new Date(dateString);
+  const date = new Date(dateString);
 
-  if (isNaN(postDate.getTime())) return "Just now";
+  if (Number.isNaN(date.getTime())) {
+    return dateString;
+  }
 
-  return postDate.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: true,
   });
 }
 
-const ShelterCard = ({ shelter, isSelected, onSelect }) => {
-  const backendBaseUrl = "http://localhost:5000";
+function getNumber(value, fallback = 0) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+export default function ShelterCard({
+  shelter,
+  isSelected,
+  onSelect,
+  onBedsChanged,
+}) {
+  const [updatingBeds, setUpdatingBeds] = useState(false);
 
   const hasImage = Boolean(shelter.image_url);
-  const imageUrl = hasImage ? `${backendBaseUrl}${shelter.image_url}` : null;
+  const imageUrl = hasImage
+    ? `http://localhost:5000/${shelter.image_url.replace(/^\//, '')}`
+    : null;
 
-  const availableBeds = shelter.available_beds ?? (shelter.capacity ? shelter.capacity - (shelter.occupied_beds || 0) : 'N/A');
-  const totalBeds = shelter.total_beds ?? shelter.capacity ?? 'N/A';
+  const hasBedData =
+    shelter.total_beds !== null &&
+    shelter.total_beds !== undefined &&
+    getNumber(shelter.total_beds, 0) > 0;
 
-  // Format exact creation timestamp
-  const displayTime = formatPostTime(shelter.created_at || shelter.timestamp || shelter.created_time || shelter.uploaded_at);
+  const totalBeds = hasBedData ? getNumber(shelter.total_beds) : 0;
+
+  const availableBeds = hasBedData
+    ? Math.min(
+        totalBeds,
+        Math.max(
+          0,
+          shelter.available_beds !== null &&
+            shelter.available_beds !== undefined
+            ? getNumber(shelter.available_beds)
+            : totalBeds - getNumber(shelter.occupied_beds)
+        )
+      )
+    : 0;
+
+  const updateBeds = async (action, event) => {
+    event.stopPropagation();
+
+    if (!shelter.is_admin) {
+      alert('Bed management is available only for registered shelters.');
+      return;
+    }
+
+    setUpdatingBeds(true);
+
+    try {
+      const response = await API.patch(`/shelters/${shelter.id}/beds`, {
+        action,
+      });
+
+      if (onBedsChanged) {
+        onBedsChanged(response.data.data);
+      }
+    } catch (error) {
+      console.error('Bed update failed:', error);
+      alert(error.response?.data?.message || 'Unable to update beds.');
+    } finally {
+      setUpdatingBeds(false);
+    }
+  };
+
+  // Resolve timestamp fallback options across various potential backend schemas
+  const postTimeRaw =
+    shelter.created_at ||
+    shelter.timestamp ||
+    shelter.created_time ||
+    shelter.uploaded_at;
 
   return (
     <div
@@ -39,21 +100,33 @@ const ShelterCard = ({ shelter, isSelected, onSelect }) => {
         borderRadius: '12px',
         padding: '16px',
         border: isSelected ? '2px solid #3b82f6' : '1px solid #334155',
-        boxShadow: isSelected ? '0 0 12px rgba(59, 130, 246, 0.4)' : '0 4px 6px rgba(0, 0, 0, 0.3)',
+        boxShadow: isSelected
+          ? '0 0 12px rgba(59, 130, 246, 0.4)'
+          : '0 4px 6px rgba(0, 0, 0, 0.3)',
         cursor: 'pointer',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        transition: 'all 0.2s ease-in-out',
       }}
     >
-      {/* Shelter Image */}
-      <div style={{ width: '100%', height: '140px', marginBottom: '12px', borderRadius: '8px', overflow: 'hidden' }}>
+      <div
+        style={{
+          width: '100%',
+          height: '140px',
+          marginBottom: '12px',
+          borderRadius: '8px',
+          overflow: 'hidden',
+        }}
+      >
         {hasImage ? (
           <img
             src={imageUrl}
             alt={shelter.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }}
           />
         ) : (
           <div
@@ -66,7 +139,6 @@ const ShelterCard = ({ shelter, isSelected, onSelect }) => {
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '0.85rem',
-              fontWeight: '500',
             }}
           >
             📷 No Image Uploaded
@@ -74,64 +146,169 @@ const ShelterCard = ({ shelter, isSelected, onSelect }) => {
         )}
       </div>
 
-      {/* Details */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-          <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 'bold', color: '#f8fafc' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: '8px',
+            marginBottom: '8px',
+          }}
+        >
+          <h3
+            style={{
+              margin: 0,
+              fontSize: '1.1rem',
+              fontWeight: 'bold',
+              color: '#f8fafc',
+            }}
+          >
             {shelter.name}
           </h3>
+
           <span
             style={{
               padding: '2px 8px',
               fontSize: '0.75rem',
               fontWeight: '600',
               borderRadius: '4px',
-              backgroundColor: shelter.is_safe !== false ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)',
+              backgroundColor:
+                shelter.is_safe !== false
+                  ? 'rgba(16, 185, 129, 0.2)'
+                  : 'rgba(244, 63, 94, 0.2)',
               color: shelter.is_safe !== false ? '#34d399' : '#f87171',
-              border: shelter.is_safe !== false ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(244, 63, 94, 0.4)',
             }}
           >
             {shelter.is_safe !== false ? 'Safe' : 'Unsafe'}
           </span>
         </div>
 
-        {/* Location & Exact Posted Timestamp */}
-        <p style={{ margin: '0 0 4px 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-          📍 {shelter.location_name || `${shelter.distance || 'Near'} away`}
-        </p>
-        <p style={{ margin: '0 0 12px 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-          🕒 Posted: <strong style={{ color: '#e2e8f0' }}>{displayTime}</strong>
+        <p
+          style={{
+            margin: '0 0 5px',
+            fontSize: '0.8rem',
+            color: '#94a3b8',
+          }}
+        >
+          📍 <strong style={{ color: '#e2e8f0' }}>
+            {shelter.distance || 'Distance unavailable'} away
+          </strong>
+          {shelter.location_name ? ` • ${shelter.location_name}` : ''}
         </p>
 
-        {/* Available Space / Beds */}
+        <p
+          style={{
+            margin: '0 0 12px',
+            fontSize: '0.8rem',
+            color: '#94a3b8',
+          }}
+        >
+          🕒 Posted:{' '}
+          <strong style={{ color: '#e2e8f0' }}>
+            {formatPostTime(postTimeRaw)}
+          </strong>
+        </p>
+
         <div
           style={{
             backgroundColor: '#1e293b',
-            padding: '8px 12px',
+            padding: '10px 12px',
             borderRadius: '6px',
             marginBottom: '12px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontSize: '0.85rem',
           }}
         >
-          <span style={{ color: '#cbd5e1' }}>Available Beds:</span>
-          <span style={{ fontWeight: 'bold', color: availableBeds > 0 || availableBeds === 'N/A' ? '#34d399' : '#f87171' }}>
-            {availableBeds} / {totalBeds}
-          </span>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: shelter.is_admin && hasBedData ? '8px' : 0,
+              fontSize: '0.85rem',
+            }}
+          >
+            <span style={{ color: '#cbd5e1' }}>Available Beds:</span>
+
+            <strong
+              style={{
+                color: !hasBedData
+                  ? '#94a3b8'
+                  : availableBeds > 0
+                    ? '#34d399'
+                    : '#f87171',
+              }}
+            >
+              {hasBedData
+                ? `${availableBeds} / ${totalBeds} beds`
+                : 'Not available'}
+            </strong>
+          </div>
+
+          {shelter.is_admin && hasBedData && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                disabled={updatingBeds || availableBeds <= 0}
+                onClick={(event) => updateBeds('remove', event)}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  borderRadius: '5px',
+                  padding: '7px',
+                  cursor: 'pointer',
+                  backgroundColor: '#dc2626',
+                  color: '#ffffff',
+                  fontWeight: '600',
+                  opacity: updatingBeds || availableBeds <= 0 ? 0.5 : 1,
+                }}
+              >
+                − Remove Bed
+              </button>
+
+              <button
+                type="button"
+                disabled={updatingBeds || availableBeds >= totalBeds}
+                onClick={(event) => updateBeds('add', event)}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  borderRadius: '5px',
+                  padding: '7px',
+                  cursor: 'pointer',
+                  backgroundColor: '#059669',
+                  color: '#ffffff',
+                  fontWeight: '600',
+                  opacity: updatingBeds || availableBeds >= totalBeds ? 0.5 : 1,
+                }}
+              >
+                + Add Bed
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Risk & Facilities */}
-        <p style={{ margin: '0 0 4px 0', fontSize: '0.8rem', color: '#cbd5e1' }}>
-          <strong style={{ color: '#94a3b8' }}>ML Risk:</strong> {shelter.risk_level || 'Low Risk'}
+        <p
+          style={{
+            margin: '0 0 4px',
+            fontSize: '0.8rem',
+            color: '#cbd5e1',
+          }}
+        >
+          <strong style={{ color: '#94a3b8' }}>ML Risk:</strong>{' '}
+          {shelter.risk_level || 'Low Risk'}
         </p>
-        <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>
-          <strong style={{ color: '#cbd5e1' }}>Facilities:</strong> {shelter.facilities || 'Water, Emergency Shelter, Power'}
+
+        <p
+          style={{
+            margin: 0,
+            fontSize: '0.8rem',
+            color: '#94a3b8',
+          }}
+        >
+          <strong style={{ color: '#cbd5e1' }}>Facilities:</strong>{' '}
+          {shelter.facilities || 'Water, Emergency Shelter, Power'}
         </p>
       </div>
     </div>
   );
-};
-
-export default ShelterCard;
+}

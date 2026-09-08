@@ -295,8 +295,17 @@ def predict_shelters_risk():
                     "name": f"⭐ {s_dict.get('name', 'Shelter')} (Official)",
                     "lat": s_lat,
                     "lon": s_lng,
+                    "location_name": s_dict.get("location_name", ""),
+                    "created_at": s_dict.get("created_at"),
+                    "total_beds": int(s_dict.get("total_beds") or 0),
+                    "available_beds": int(s_dict.get("available_beds") or 0),
+                    "occupied_beds": max(
+                        0,
+                        int(s_dict.get("total_beds") or 0)
+                        - int(s_dict.get("available_beds") or 0),
+                    ),
                     "type": "Admin Registered Shelter",
-                    "capacity": f"{total_cap} beds ({occ} occupied)",
+                    "capacity": int(s_dict.get("total_beds") or 0),
                     "distance_km": dist,
                     "is_admin": True,
                 })
@@ -363,6 +372,11 @@ def predict_shelters_risk():
                     "name": shelter["name"],
                     "lat": s_lat,
                     "lon": s_lon,
+                    "location_name": shelter.get("location_name", ""),
+                    "created_at": shelter.get("created_at"),
+                    "total_beds": shelter.get("total_beds"),
+                    "available_beds": shelter.get("available_beds"),
+                    "occupied_beds": shelter.get("occupied_beds", 0),
                     "type": shelter.get("type", "Relief Shelter"),
                     "capacity": shelter.get("capacity", "N/A"),
                     "distance_km": distance_km,
@@ -370,6 +384,7 @@ def predict_shelters_risk():
                     "high_probability": ml_res["high_probability"],
                     "is_safe": ml_res["risk"].lower() != "high",
                     "is_admin": shelter.get("is_admin", False),
+                    
                 }
 
                 if shelter.get("is_admin"):

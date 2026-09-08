@@ -455,17 +455,31 @@ export default function Dashboard() {
       const response = await API.post('/predict-shelters-risk', { lat, lng }, { signal: controller.signal });
       const rawShelters = response.data.data || response.data || [];
 
-     const formattedShelters = rawShelters.map((s, idx) => ({
-  ...s,
-  id: s.id || s._id || `shelter-${idx}`,
-  lng: s.lon || s.lng,
-  distance: `${calculateDistance(lat, lng, s.lat, s.lon || s.lng)} km`,
-  facilities: s.facilities || 'Water, Emergency Shelter, Power',
-  total_beds: s.total_beds || s.capacity || 300,
-  available_beds: s.available_beds || (s.capacity ? s.capacity - (s.occupied_beds || 0) : 150),
-  // Preserve actual database creation timestamp
-  created_at: s.created_at || s.timestamp || null,
-}));
+      const formattedShelters = rawShelters.map((s, idx) => ({
+        ...s,
+        id: s.id || s._id || `shelter-${idx}`,
+        lng: s.lon || s.lng,
+        distance: `${calculateDistance(lat, lng, s.lat, s.lon || s.lng)} km`,
+        facilities: s.facilities || 'Water, Emergency Shelter, Power',
+        total_beds:
+          s.total_beds !== undefined && s.total_beds !== null
+            ? Number(s.total_beds)
+            : s.capacity
+            ? Number(s.capacity)
+            : 300,
+        available_beds:
+          s.available_beds !== undefined && s.available_beds !== null
+            ? Number(s.available_beds)
+            : s.capacity
+            ? Number(s.capacity) - (Number(s.occupied_beds) || 0)
+            : 150,
+        occupied_beds:
+          s.occupied_beds !== undefined && s.occupied_beds !== null
+            ? Number(s.occupied_beds)
+            : 0,
+        location_name: s.location_name || '',
+        created_at: s.created_at || s.timestamp || null,
+      }));
 
       setShelters(formattedShelters);
       if (formattedShelters.length > 0) {
@@ -499,6 +513,32 @@ export default function Dashboard() {
 
     setShelters((prevShelters) => [formattedNewShelter, ...prevShelters]);
     setSelectedShelter(formattedNewShelter);
+  };
+
+  const handleBedsChanged = (updatedShelter) => {
+    setShelters((currentShelters) =>
+      currentShelters.map((item) =>
+        item.id === `admin_${updatedShelter.id}` || item.id === updatedShelter.id
+          ? {
+              ...item,
+              ...updatedShelter,
+              id: `admin_${updatedShelter.id}`,
+              is_admin: true,
+            }
+          : item
+      )
+    );
+
+    setSelectedShelter((current) =>
+      current?.id === `admin_${updatedShelter.id}` || current?.id === updatedShelter.id
+        ? {
+            ...current,
+            ...updatedShelter,
+            id: `admin_${updatedShelter.id}`,
+            is_admin: true,
+          }
+        : current
+    );
   };
 
   const handleLocationChange = useCallback(
@@ -676,6 +716,7 @@ export default function Dashboard() {
               shelter={shelter}
               isSelected={selectedShelter?.id === shelter.id}
               onSelect={setSelectedShelter}
+              onBedsChanged={handleBedsChanged}
             />
           ))}
         </div>
