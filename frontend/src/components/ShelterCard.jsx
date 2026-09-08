@@ -5,7 +5,6 @@ function formatPostTime(dateString) {
   if (!dateString) return 'Not available';
 
   const date = new Date(dateString);
-
   if (Number.isNaN(date.getTime())) {
     return dateString;
   }
@@ -20,108 +19,123 @@ function formatPostTime(dateString) {
   });
 }
 
-function getNumber(value, fallback = 0) {
-  const number = Number.parseInt(value, 10);
-  return Number.isFinite(number) ? number : fallback;
+function parseInteger(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 export default function ShelterCard({
-  shelter,
-  isSelected,
+  shelter = {},
+  isSelected = false,
   onSelect,
   onBedsChanged,
 }) {
-  const [updatingBeds, setUpdatingBeds] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const hasImage = Boolean(shelter.image_url);
-  const imageUrl = hasImage
-    ? `http://localhost:5000/${shelter.image_url.replace(/^\//, '')}`
-    : null;
+  // --- Image Resolution ---
+  const rawImage = shelter.photoUrl || shelter.image_url || shelter.image || shelter.photo;
+  let imageUrl = null;
 
+  if (rawImage) {
+    const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    imageUrl = /^https?:\/\/|^data:image/.test(rawImage)
+      ? rawImage
+      : `${baseURL.replace(/\/$/, '')}/${rawImage.replace(/^\//, '')}`;
+  }
+
+  // --- Bed Metrics Calculation ---
   const hasBedData =
     shelter.total_beds !== null &&
     shelter.total_beds !== undefined &&
-    getNumber(shelter.total_beds, 0) > 0;
+    parseInteger(shelter.total_beds, 0) > 0;
 
-  const totalBeds = hasBedData ? getNumber(shelter.total_beds) : 0;
+  const totalBeds = hasBedData ? parseInteger(shelter.total_beds) : 0;
+  const occupiedBeds = parseInteger(shelter.occupied_beds, 0);
 
   const availableBeds = hasBedData
     ? Math.min(
         totalBeds,
         Math.max(
           0,
-          shelter.available_beds !== null &&
-            shelter.available_beds !== undefined
-            ? getNumber(shelter.available_beds)
-            : totalBeds - getNumber(shelter.occupied_beds)
+          shelter.available_beds !== null && shelter.available_beds !== undefined
+            ? parseInteger(shelter.available_beds)
+            : totalBeds - occupiedBeds
         )
       )
     : 0;
 
-  const updateBeds = async (action, event) => {
+  // --- Bed Updates Handler ---
+  const handleBedUpdate = async (action, event) => {
     event.stopPropagation();
 
     if (!shelter.is_admin) {
-      alert('Bed management is available only for registered shelters.');
+      alert('Bed management is reserved for authorized shelter administrators.');
       return;
     }
 
-    setUpdatingBeds(true);
-
+    setIsUpdating(true);
     try {
-      const response = await API.patch(`/shelters/${shelter.id}/beds`, {
-        action,
-      });
-
+      const response = await API.patch(`/shelters/${shelter.id}/beds`, { action });
       if (onBedsChanged) {
-        onBedsChanged(response.data.data);
+        onBedsChanged(response.data?.data || response.data);
       }
     } catch (error) {
-      console.error('Bed update failed:', error);
-      alert(error.response?.data?.message || 'Unable to update beds.');
+      console.error('Failed to update bed capacity:', error);
+      alert(error.response?.data?.message || 'Unable to modify bed allocation.');
     } finally {
-      setUpdatingBeds(false);
+      setIsUpdating(false);
     }
   };
 
-  // Resolve timestamp fallback options across various potential backend schemas
-  const postTimeRaw =
+  const rawTimestamp =
     shelter.created_at ||
+    shelter.createdAt ||
     shelter.timestamp ||
     shelter.created_time ||
     shelter.uploaded_at;
 
+  const isSafe = shelter.is_safe !== false;
+
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect && onSelect(shelter)}
+      onKeyDown={(e) => e.key === 'Enter' && onSelect && onSelect(shelter)}
       style={{
         backgroundColor: '#0f172a',
-        color: '#ffffff',
-        borderRadius: '12px',
+        color: '#f8fafc',
+        borderRadius: '16px',
         padding: '16px',
-        border: isSelected ? '2px solid #3b82f6' : '1px solid #334155',
+        border: isSelected ? '2px solid #3b82f6' : '1px solid #1e293b',
         boxShadow: isSelected
-          ? '0 0 12px rgba(59, 130, 246, 0.4)'
-          : '0 4px 6px rgba(0, 0, 0, 0.3)',
+          ? '0 0 16px rgba(59, 130, 246, 0.3)'
+          : '0 4px 12px rgba(0, 0, 0, 0.25)',
         cursor: 'pointer',
+        transition: 'all 0.2s ease-in-out',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
+        position: 'relative',
+        overflow: 'hidden',
       }}
     >
+      {/* Header Preview Image */}
       <div
         style={{
           width: '100%',
-          height: '140px',
-          marginBottom: '12px',
-          borderRadius: '8px',
+          height: '150px',
+          borderRadius: '10px',
           overflow: 'hidden',
+          backgroundColor: '#1e293b',
+          marginBottom: '14px',
+          position: 'relative',
         }}
       >
-        {hasImage ? (
+        {imageUrl ? (
           <img
             src={imageUrl}
-            alt={shelter.name}
+            alt={shelter.name || 'Shelter Image'}
             style={{
               width: '100%',
               height: '100%',
@@ -133,89 +147,69 @@ export default function ShelterCard({
             style={{
               width: '100%',
               height: '100%',
-              backgroundColor: '#1e293b',
-              color: '#94a3b8',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '0.85rem',
+              color: '#64748b',
+              fontSize: '0.875rem',
+              fontWeight: '500',
             }}
           >
-            📷 No Image Uploaded
+            📷 No Image Available
           </div>
         )}
+
+        {/* Safety Badge */}
+        <span
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            padding: '4px 10px',
+            fontSize: '0.75rem',
+            fontWeight: '700',
+            borderRadius: '20px',
+            backdropFilter: 'blur(8px)',
+            backgroundColor: isSafe ? 'rgba(16, 185, 129, 0.85)' : 'rgba(239, 68, 68, 0.85)',
+            color: '#ffffff',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+          }}
+        >
+          {isSafe ? '✓ Safe Zone' : '⚠️ Warning'}
+        </span>
       </div>
 
-      <div>
-        <div
+      {/* Primary Details */}
+      <div style={{ flex: 1 }}>
+        <h3
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: '8px',
-            marginBottom: '8px',
+            margin: '0 0 6px 0',
+            fontSize: '1.15rem',
+            fontWeight: '700',
+            color: '#ffffff',
+            lineHeight: '1.3',
           }}
         >
-          <h3
-            style={{
-              margin: 0,
-              fontSize: '1.1rem',
-              fontWeight: 'bold',
-              color: '#f8fafc',
-            }}
-          >
-            {shelter.name}
-          </h3>
+          {shelter.name || 'Unnamed Shelter'}
+        </h3>
 
-          <span
-            style={{
-              padding: '2px 8px',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              borderRadius: '4px',
-              backgroundColor:
-                shelter.is_safe !== false
-                  ? 'rgba(16, 185, 129, 0.2)'
-                  : 'rgba(244, 63, 94, 0.2)',
-              color: shelter.is_safe !== false ? '#34d399' : '#f87171',
-            }}
-          >
-            {shelter.is_safe !== false ? 'Safe' : 'Unsafe'}
-          </span>
-        </div>
-
-        <p
-          style={{
-            margin: '0 0 5px',
-            fontSize: '0.8rem',
-            color: '#94a3b8',
-          }}
-        >
-          📍 <strong style={{ color: '#e2e8f0' }}>
-            {shelter.distance || 'Distance unavailable'} away
-          </strong>
+        <p style={subTextStyle}>
+          📍 <span style={{ color: '#e2e8f0', fontWeight: '600' }}>{shelter.distance || 'N/A'}</span>
           {shelter.location_name ? ` • ${shelter.location_name}` : ''}
         </p>
 
-        <p
-          style={{
-            margin: '0 0 12px',
-            fontSize: '0.8rem',
-            color: '#94a3b8',
-          }}
-        >
-          🕒 Posted:{' '}
-          <strong style={{ color: '#e2e8f0' }}>
-            {formatPostTime(postTimeRaw)}
-          </strong>
+        <p style={subTextStyle}>
+          🕒 Posted: <span style={{ color: '#cbd5e1' }}>{formatPostTime(rawTimestamp)}</span>
         </p>
 
+        {/* Capacity & Live Management */}
         <div
           style={{
             backgroundColor: '#1e293b',
-            padding: '10px 12px',
-            borderRadius: '6px',
-            marginBottom: '12px',
+            padding: '12px',
+            borderRadius: '10px',
+            margin: '12px 0',
+            border: '1px solid #334155',
           }}
         >
           <div
@@ -223,92 +217,90 @@ export default function ShelterCard({
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: shelter.is_admin && hasBedData ? '8px' : 0,
-              fontSize: '0.85rem',
+              marginBottom: shelter.is_admin && hasBedData ? '10px' : '0',
             }}
           >
-            <span style={{ color: '#cbd5e1' }}>Available Beds:</span>
-
-            <strong
+            <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: '500' }}>
+              Bed Availability
+            </span>
+            <span
               style={{
+                fontSize: '0.85rem',
+                fontWeight: '700',
                 color: !hasBedData
-                  ? '#94a3b8'
+                  ? '#64748b'
                   : availableBeds > 0
-                    ? '#34d399'
-                    : '#f87171',
+                  ? '#10b981'
+                  : '#ef4444',
               }}
             >
-              {hasBedData
-                ? `${availableBeds} / ${totalBeds} beds`
-                : 'Not available'}
-            </strong>
+              {hasBedData ? `${availableBeds} / ${totalBeds} Left` : 'Not Tracked'}
+            </span>
           </div>
 
           {shelter.is_admin && hasBedData && (
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 type="button"
-                disabled={updatingBeds || availableBeds <= 0}
-                onClick={(event) => updateBeds('remove', event)}
+                disabled={isUpdating || availableBeds <= 0}
+                onClick={(e) => handleBedUpdate('remove', e)}
                 style={{
-                  flex: 1,
-                  border: 'none',
-                  borderRadius: '5px',
-                  padding: '7px',
-                  cursor: 'pointer',
+                  ...buttonStyle,
                   backgroundColor: '#dc2626',
-                  color: '#ffffff',
-                  fontWeight: '600',
-                  opacity: updatingBeds || availableBeds <= 0 ? 0.5 : 1,
+                  opacity: isUpdating || availableBeds <= 0 ? 0.4 : 1,
                 }}
               >
-                − Remove Bed
+                − Occupy Bed
               </button>
 
               <button
                 type="button"
-                disabled={updatingBeds || availableBeds >= totalBeds}
-                onClick={(event) => updateBeds('add', event)}
+                disabled={isUpdating || availableBeds >= totalBeds}
+                onClick={(e) => handleBedUpdate('add', e)}
                 style={{
-                  flex: 1,
-                  border: 'none',
-                  borderRadius: '5px',
-                  padding: '7px',
-                  cursor: 'pointer',
+                  ...buttonStyle,
                   backgroundColor: '#059669',
-                  color: '#ffffff',
-                  fontWeight: '600',
-                  opacity: updatingBeds || availableBeds >= totalBeds ? 0.5 : 1,
+                  opacity: isUpdating || availableBeds >= totalBeds ? 0.4 : 1,
                 }}
               >
-                + Add Bed
+                + Vacate Bed
               </button>
             </div>
           )}
         </div>
 
-        <p
-          style={{
-            margin: '0 0 4px',
-            fontSize: '0.8rem',
-            color: '#cbd5e1',
-          }}
-        >
-          <strong style={{ color: '#94a3b8' }}>ML Risk:</strong>{' '}
-          {shelter.risk_level || 'Low Risk'}
-        </p>
-
-        <p
-          style={{
-            margin: 0,
-            fontSize: '0.8rem',
-            color: '#94a3b8',
-          }}
-        >
-          <strong style={{ color: '#cbd5e1' }}>Facilities:</strong>{' '}
-          {shelter.facilities || 'Water, Emergency Shelter, Power'}
-        </p>
+        {/* Metadata Footer */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.8rem' }}>
+          <div style={{ color: '#94a3b8' }}>
+            <span style={{ color: '#64748b', fontWeight: '600' }}>Risk Assessment: </span>
+            <span style={{ color: '#e2e8f0' }}>{shelter.risk_level || 'Low Risk'}</span>
+          </div>
+          <div style={{ color: '#94a3b8' }}>
+            <span style={{ color: '#64748b', fontWeight: '600' }}>Facilities: </span>
+            <span style={{ color: '#e2e8f0' }}>
+              {shelter.facilities || 'Water, Power, First Aid'}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+const subTextStyle = {
+  margin: '0 0 6px 0',
+  fontSize: '0.825rem',
+  color: '#94a3b8',
+};
+
+const buttonStyle = {
+  flex: 1,
+  border: 'none',
+  borderRadius: '6px',
+  padding: '8px',
+  color: '#ffffff',
+  fontSize: '0.8rem',
+  fontWeight: '600',
+  cursor: 'pointer',
+  transition: 'opacity 0.15s ease',
+};

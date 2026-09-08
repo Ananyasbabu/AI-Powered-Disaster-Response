@@ -6,44 +6,64 @@ class Shelter(me.Document):
     meta = {
         "collection": "shelters",
         "strict": False,  # Prevents schema exceptions on legacy fields
+        "indexes": [
+            "created_at",
+            [("location", "2dsphere")],  # Geospatial index for location queries
+        ],
     }
 
+    # Core details
     name = me.StringField(required=True, max_length=150)
-    location_name = me.StringField(max_length=255)
+    location_name = me.StringField(max_length=255, default="")
 
-    # Make coordinates optional so MongoEngine won't crash on existing null records
+    # Geographic coordinates
     latitude = me.FloatField(required=False, default=0.0)
     longitude = me.FloatField(required=False, default=0.0)
+    location = me.DictField()  # GeoJSON format: {"type": "Point", "coordinates": [lng, lat]}
 
+    # Capacity management
     total_beds = me.IntField(default=0)
     available_beds = me.IntField(default=0)
-    image_url = me.StringField(max_length=255)
-    facilities = me.StringField(default="Water, Emergency Shelter, Power")
-    status = me.StringField(default="Safe")
-    risk_level = me.StringField(default="Low Risk")
-    
-    # PASS CALLABLE (datetime.now) OR USE standard callable default
-    created_at = me.DateTimeField(default=lambda: datetime.now(timezone.utc))
-    created_by_role = me.StringField(default="user")
-
-    # Dynamic fields for schema compatibility
-    location = me.DictField()
-    contact = me.StringField()
     occupied_beds = me.IntField(default=0)
     total_capacity = me.IntField(default=0)
 
+    # Metadata & status
+    image_url = me.StringField(max_length=500)
+    facilities = me.StringField(default="Water, Emergency Shelter, Power")
+    status = me.StringField(default="Safe")
+    risk_level = me.StringField(default="Low Risk")
+    contact = me.StringField(default="")
+
+    # Audit & ownership
+    created_at = me.DateTimeField(default=lambda: datetime.now(timezone.utc))
+    created_by_role = me.StringField(default="user")
+
+    def clean(self):
+        """Sanitize and keep capacity & location fields in sync before saving."""
+        super().clean()
+
+        # Synchronize total bed values across legacy/new attributes
+        if not self.total_beds and self.total_capacity:
+            self.total_beds = self.total_capacity
+        elif not self.total_capacity and self.total_beds:
+            self.total_capacity = self.total_beds
+
+        # Clamp available beds to non-negative boundaries
+        if self.available_beds < 0:
+            self.available_beds = 0
+
     def to_dict(self):
-        # Fallback to location coordinates if root latitude/longitude are missing or None
+        """Serialize MongoEngine model to JSON-compliant dictionary."""
         lat = self.latitude
         lng = self.longitude
 
-        if (lat is None or lng is None) and self.location and isinstance(self.location, dict):
+        # Extract coordinates from GeoJSON location dictionary if flat lat/lng are unpopulated
+        if (lat is None or lng is None or (lat == 0.0 and lng == 0.0)) and isinstance(self.location, dict):
             coords = self.location.get("coordinates", [])
             if len(coords) >= 2:
-                lng = coords[0]
-                lat = coords[1]
+                lng, lat = coords[0], coords[1]
 
-        # Convert to float safely with fallback to 0.0
+        # Ensure safe float conversions
         try:
             lat = float(lat) if lat is not None else 0.0
         except (ValueError, TypeError):
@@ -54,11 +74,17 @@ class Shelter(me.Document):
         except (ValueError, TypeError):
             lng = 0.0
 
+        # Calculate bed metrics
         total = self.total_beds if self.total_beds else (self.total_capacity or 0)
-        available = (
-            self.available_beds
-            if self.available_beds is not None
-            else max(0, total - (self.occupied_beds or 0))
+        
+        if self.available_beds is not None:
+            available = max(0, self.available_beds)
+        else:
+            available = max(0, total - (self.occupied_beds or 0))
+
+        # Format creation timestamp (Fixed: Avoid injecting new timestamp on serialization if missing)
+        formatted_created_at = (
+            self.created_at.isoformat() if self.created_at else None
         )
 
         return {
@@ -72,14 +98,13 @@ class Shelter(me.Document):
             "lng": lng,
             "total_beds": total,
             "available_beds": available,
-            "image_url": self.image_url,
+            "occupied_beds": self.occupied_beds or max(0, total - available),
+            "image_url": self.image_url or "",
             "facilities": self.facilities,
             "status": self.status,
+            "is_safe": self.status.lower() != "unsafe",
             "risk_level": self.risk_level,
-            "created_at": (
-                self.created_at.isoformat()
-                if self.created_at
-                else datetime.now(timezone.utc).isoformat()
-            ),
+            "contact": self.contact or "",
+            "created_at": formatted_created_at,
             "created_by_role": self.created_by_role,
         }
