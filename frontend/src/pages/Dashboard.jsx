@@ -16,11 +16,11 @@ L.Icon.Default.mergeOptions({
   shadowUrl,
 });
 
-// Helper function to format creation/upload timestamps
+// Helper function to format creation/upload timestamps statically
 function formatUploadedTime(dateString) {
-  if (!dateString) return 'Recently added';
+  if (!dateString) return 'Timestamp unavailable';
   const date = new Date(dateString);
-  if (isNaN(date.getTime())) return 'Recently added';
+  if (isNaN(date.getTime())) return 'Timestamp unavailable';
 
   return date.toLocaleString('en-US', {
     month: 'short',
@@ -171,7 +171,6 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
     }
   }, [userCoords?.lat, userCoords?.lng, updateLocationPoint]);
 
-  // Render Blue Polyline Only
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map._loaded) return;
@@ -184,7 +183,7 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
     if (safeRoute && safeRoute.coordinates && safeRoute.coordinates.length > 0) {
       const polylineCoords = safeRoute.coordinates.map((c) => [c[1], c[0]]);
       routeLayerRef.current = L.polyline(polylineCoords, {
-        color: '#2563eb', // Always Blue line
+        color: '#2563eb',
         weight: 6,
         opacity: 0.9,
         lineJoin: 'round',
@@ -217,7 +216,7 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
           fillOpacity: 0.9,
         })
           .bindTooltip(
-            `<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}<br/>Reported: ${formatUploadedTime(shelter.created_at || shelter.createdAt)}`
+            `<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}<br/>Reported: ${formatUploadedTime(shelter.created_at)}`
           )
           .on('click', () => onShelterSelect(shelter));
 
@@ -266,7 +265,6 @@ export default function Dashboard() {
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Search state for custom destination city/trip location
   const [destinationSearch, setDestinationSearch] = useState('');
   const [isSearchingDestination, setIsSearchingDestination] = useState(false);
 
@@ -283,7 +281,6 @@ export default function Dashboard() {
       .catch((err) => console.error('Error loading verified incidents:', err));
   }, []);
 
-  // Dynamic geometry hazard check with local street buffer (0.3 km)
   const checkRouteHasHazards = (geometryCoordinates, hazardsList) => {
     let breachCount = 0;
     let minDistanceToHazard = Infinity;
@@ -418,6 +415,7 @@ export default function Dashboard() {
           is_safe: true,
           risk_level: 'Destination Selected',
           created_at: new Date().toISOString(),
+          photoUrl: null,
         };
 
         setSelectedShelter(targetDestination);
@@ -478,7 +476,9 @@ export default function Dashboard() {
             ? Number(s.occupied_beds)
             : 0,
         location_name: s.location_name || '',
-        created_at: s.created_at || s.timestamp || null,
+        // Use reported timestamp from API response or lock static ISO string once
+        created_at: s.created_at || s.createdAt || s.timestamp || s.updatedAt || null,
+        photoUrl: s.photoUrl || s.photo_url || s.image || s.imageUrl || null,
       }));
 
       setShelters(formattedShelters);
@@ -496,9 +496,20 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Updated to handle both static reported timestamp and image uploads
   const handleShelterAdded = (newShelter) => {
     const shelterLat = parseFloat(newShelter.lat || userCoords.lat);
     const shelterLng = parseFloat(newShelter.lon || newShelter.lng || userCoords.lng);
+
+    const exactTimestamp =
+      newShelter.created_at || newShelter.createdAt || newShelter.timestamp || new Date().toISOString();
+
+    const uploadedImage =
+      newShelter.photoUrl ||
+      newShelter.photo_url ||
+      newShelter.image ||
+      newShelter.imageUrl ||
+      (newShelter.photo && typeof newShelter.photo === 'string' ? newShelter.photo : null);
 
     const formattedNewShelter = {
       ...newShelter,
@@ -506,9 +517,10 @@ export default function Dashboard() {
       lat: shelterLat,
       lng: shelterLng,
       distance: `${calculateDistance(userCoords.lat, userCoords.lng, shelterLat, shelterLng)} km`,
-      is_safe: true,
-      risk_level: 'Low Risk',
-      created_at: newShelter.created_at || newShelter.createdAt || new Date().toISOString(),
+      is_safe: newShelter.is_safe !== undefined ? newShelter.is_safe : true,
+      risk_level: newShelter.risk_level || 'Low Risk',
+      created_at: exactTimestamp,
+      photoUrl: uploadedImage,
     };
 
     setShelters((prevShelters) => [formattedNewShelter, ...prevShelters]);
@@ -733,17 +745,29 @@ export default function Dashboard() {
           <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '1rem' }}>
             <thead>
               <tr style={{ background: 'rgba(255, 255, 255, 0.05)', textAlign: 'left' }}>
+                <th style={{ padding: '0.75rem' }}>Photo</th>
                 <th style={{ padding: '0.75rem' }}>Shelter Name</th>
                 <th style={{ padding: '0.75rem' }}>Distance</th>
                 <th style={{ padding: '0.75rem' }}>ML Risk Level</th>
                 <th style={{ padding: '0.75rem' }}>High Flood Probability</th>
                 <th style={{ padding: '0.75rem' }}>Safety Status</th>
-                <th style={{ padding: '0.75rem' }}>Uploaded Time</th>
+                <th style={{ padding: '0.75rem' }}>Reported Time</th>
               </tr>
             </thead>
             <tbody>
               {shelters.map((s) => (
                 <tr key={s.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                  <td style={{ padding: '0.75rem' }}>
+                    {s.photoUrl ? (
+                      <img
+                        src={s.photoUrl}
+                        alt={s.name}
+                        style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px' }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: '0.8rem', color: '#71717a' }}>No Image</span>
+                    )}
+                  </td>
                   <td style={{ padding: '0.75rem' }}>{s.name}</td>
                   <td style={{ padding: '0.75rem' }}>{s.distance}</td>
                   <td style={{ padding: '0.75rem' }}>{s.risk_level || 'N/A'}</td>
