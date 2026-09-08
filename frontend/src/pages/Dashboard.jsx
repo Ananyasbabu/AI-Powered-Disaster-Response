@@ -16,6 +16,21 @@ L.Icon.Default.mergeOptions({
   shadowUrl,
 });
 
+// Helper function to format creation/upload timestamps
+function formatUploadedTime(dateString) {
+  if (!dateString) return 'Recently added';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return 'Recently added';
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function calculateDistance(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1 || !lat2 || !lon2) return '0.0';
   const R = 6371;
@@ -202,10 +217,10 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
           fillOpacity: 0.9,
         })
           .bindTooltip(
-            `<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}`
+            `<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}<br/>Reported: ${formatUploadedTime(shelter.created_at || shelter.createdAt)}`
           )
           .on('click', () => onShelterSelect(shelter));
-          
+
         layerGroup.addLayer(circle);
       });
     }
@@ -235,7 +250,6 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
     };
   }, [activeLayer, incidents, shelters, selectedShelter, onShelterSelect]);
 
-  // Height increased by 1 inch (~96px) from 450px to 546px
   return <div ref={mapElement} className="leaflet-map" style={{ height: '546px', width: '100%', borderRadius: '8px' }} />;
 }
 
@@ -280,12 +294,11 @@ export default function Dashboard() {
 
       for (let hazard of hazardsList) {
         const dist = parseFloat(calculateDistance(routeLat, routeLng, hazard.lat, hazard.lng));
-        
+
         if (dist < minDistanceToHazard) {
           minDistanceToHazard = dist;
         }
 
-        // Localized street buffer: 300 meters (0.3 km)
         if (dist < 0.3) {
           breachCount++;
         }
@@ -323,7 +336,6 @@ export default function Dashboard() {
         })
         .filter(Boolean);
 
-      // Fetch primary + alternative local routes strictly from OSRM
       const osrmBaseUrl = `https://router.project-osrm.org/route/v1/driving/${userCoords.lng},${userCoords.lat};${destLng},${destLat}?overview=full&geometries=geojson&alternatives=true`;
       const res = await fetch(osrmBaseUrl);
       const data = await res.json();
@@ -335,7 +347,6 @@ export default function Dashboard() {
 
       let bestRoute = null;
 
-      // 1. Try to find a completely safe route
       for (let route of data.routes) {
         const evaluation = checkRouteHasHazards(route.geometry.coordinates, hazards);
         if (!evaluation.hasConflict) {
@@ -344,10 +355,9 @@ export default function Dashboard() {
         }
       }
 
-      // 2. If ALL alternatives pass near the hazard, pick the alternative with the fewest hazard intersections
       if (!bestRoute) {
         let lowestBreaches = Infinity;
-        
+
         for (let route of data.routes) {
           const evalResult = checkRouteHasHazards(route.geometry.coordinates, hazards);
           if (evalResult.breachCount < lowestBreaches) {
@@ -357,12 +367,10 @@ export default function Dashboard() {
         }
       }
 
-      // Fallback to primary route
       if (!bestRoute) {
         bestRoute = data.routes[0];
       }
 
-      // Double-check total distance safety cap (if route exceeds 25 km for a local trip, enforce direct route)
       const routeDistanceKm = bestRoute.distance / 1000;
       if (routeDistanceKm > 25) {
         bestRoute = data.routes[0];
@@ -384,7 +392,6 @@ export default function Dashboard() {
     calculateRouteToTarget(selectedShelter);
   };
 
-  // Search destination city/location handler
   const handleDestinationSearch = async (e) => {
     e.preventDefault();
     if (!destinationSearch.trim()) return;
@@ -410,6 +417,7 @@ export default function Dashboard() {
           distance: `${calculateDistance(userCoords.lat, userCoords.lng, destLat, destLng)} km`,
           is_safe: true,
           risk_level: 'Destination Selected',
+          created_at: new Date().toISOString(),
         };
 
         setSelectedShelter(targetDestination);
@@ -454,22 +462,23 @@ export default function Dashboard() {
         distance: `${calculateDistance(lat, lng, s.lat, s.lon || s.lng)} km`,
         facilities: s.facilities || 'Water, Emergency Shelter, Power',
         total_beds:
-  s.total_beds !== undefined && s.total_beds !== null
-    ? Number(s.total_beds)
-    : null,
-
-available_beds:
-  s.available_beds !== undefined && s.available_beds !== null
-    ? Number(s.available_beds)
-    : null,
-
-occupied_beds:
-  s.occupied_beds !== undefined && s.occupied_beds !== null
-    ? Number(s.occupied_beds)
-    : 0,
-
-location_name: s.location_name || '',
-created_at: s.created_at || null,
+          s.total_beds !== undefined && s.total_beds !== null
+            ? Number(s.total_beds)
+            : s.capacity
+            ? Number(s.capacity)
+            : 300,
+        available_beds:
+          s.available_beds !== undefined && s.available_beds !== null
+            ? Number(s.available_beds)
+            : s.capacity
+            ? Number(s.capacity) - (Number(s.occupied_beds) || 0)
+            : 150,
+        occupied_beds:
+          s.occupied_beds !== undefined && s.occupied_beds !== null
+            ? Number(s.occupied_beds)
+            : 0,
+        location_name: s.location_name || '',
+        created_at: s.created_at || s.timestamp || null,
       }));
 
       setShelters(formattedShelters);
@@ -499,38 +508,39 @@ created_at: s.created_at || null,
       distance: `${calculateDistance(userCoords.lat, userCoords.lng, shelterLat, shelterLng)} km`,
       is_safe: true,
       risk_level: 'Low Risk',
-      created_at: newShelter.created_at || new Date().toISOString(),
+      created_at: newShelter.created_at || newShelter.createdAt || new Date().toISOString(),
     };
 
     setShelters((prevShelters) => [formattedNewShelter, ...prevShelters]);
     setSelectedShelter(formattedNewShelter);
   };
-  
+
   const handleBedsChanged = (updatedShelter) => {
-  setShelters((currentShelters) =>
-    currentShelters.map((item) =>
-      item.id === `admin_${updatedShelter.id}` || item.id === updatedShelter.id
+    setShelters((currentShelters) =>
+      currentShelters.map((item) =>
+        item.id === `admin_${updatedShelter.id}` || item.id === updatedShelter.id
+          ? {
+              ...item,
+              ...updatedShelter,
+              id: `admin_${updatedShelter.id}`,
+              is_admin: true,
+            }
+          : item
+      )
+    );
+
+    setSelectedShelter((current) =>
+      current?.id === `admin_${updatedShelter.id}` || current?.id === updatedShelter.id
         ? {
-            ...item,
+            ...current,
             ...updatedShelter,
             id: `admin_${updatedShelter.id}`,
             is_admin: true,
           }
-        : item
-    )
-  );
+        : current
+    );
+  };
 
-  setSelectedShelter((current) =>
-    current?.id === `admin_${updatedShelter.id}` || current?.id === updatedShelter.id
-      ? {
-          ...current,
-          ...updatedShelter,
-          id: `admin_${updatedShelter.id}`,
-          is_admin: true,
-        }
-      : current
-  );
-};
   const handleLocationChange = useCallback(
     (lat, lng, message, isManual = false) => {
       setUserCoords({ lat, lng });
@@ -567,7 +577,6 @@ created_at: s.created_at || null,
           </div>
         </div>
 
-        {/* Small Destination Search Bar directly above the map */}
         <form
           onSubmit={handleDestinationSearch}
           style={{
@@ -729,6 +738,7 @@ created_at: s.created_at || null,
                 <th style={{ padding: '0.75rem' }}>ML Risk Level</th>
                 <th style={{ padding: '0.75rem' }}>High Flood Probability</th>
                 <th style={{ padding: '0.75rem' }}>Safety Status</th>
+                <th style={{ padding: '0.75rem' }}>Uploaded Time</th>
               </tr>
             </thead>
             <tbody>
@@ -742,6 +752,9 @@ created_at: s.created_at || null,
                   </td>
                   <td style={{ padding: '0.75rem', color: s.is_safe ? '#53b889' : '#d94a5f', fontWeight: 'bold' }}>
                     {s.is_safe ? '✓ Safe Shelter' : '⚠️ Unsafe (Avoid)'}
+                  </td>
+                  <td style={{ padding: '0.75rem', fontSize: '0.85rem', color: '#a1a1aa' }}>
+                    {formatUploadedTime(s.created_at)}
                   </td>
                 </tr>
               ))}

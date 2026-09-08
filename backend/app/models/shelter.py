@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import mongoengine as me
 
 
@@ -21,7 +21,9 @@ class Shelter(me.Document):
     facilities = me.StringField(default="Water, Emergency Shelter, Power")
     status = me.StringField(default="Safe")
     risk_level = me.StringField(default="Low Risk")
-    created_at = me.DateTimeField(default=datetime.utcnow)
+    
+    # PASS CALLABLE (datetime.now) OR USE standard callable default
+    created_at = me.DateTimeField(default=lambda: datetime.now(timezone.utc))
     created_by_role = me.StringField(default="user")
 
     # Dynamic fields for schema compatibility
@@ -75,9 +77,9 @@ class Shelter(me.Document):
             "status": self.status,
             "risk_level": self.risk_level,
             "created_at": (
-                self.created_at.strftime("%Y-%m-%d %H:%M")
+                self.created_at.isoformat()
                 if self.created_at
-                else None
+                else datetime.now(timezone.utc).isoformat()
             ),
             "created_by_role": self.created_by_role,
         }

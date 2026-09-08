@@ -35,7 +35,7 @@ export default function ShelterCard({
 
   const hasImage = Boolean(shelter.image_url);
   const imageUrl = hasImage
-    ? `http://localhost:5000/${shelter.image_url}`
+    ? `http://localhost:5000/${shelter.image_url.replace(/^\//, '')}`
     : null;
 
   const hasBedData =
@@ -84,9 +84,16 @@ export default function ShelterCard({
     }
   };
 
+  // Resolve timestamp fallback options across various potential backend schemas
+  const postTimeRaw =
+    shelter.created_at ||
+    shelter.timestamp ||
+    shelter.created_time ||
+    shelter.uploaded_at;
+
   return (
     <div
-      onClick={() => onSelect(shelter)}
+      onClick={() => onSelect && onSelect(shelter)}
       style={{
         backgroundColor: '#0f172a',
         color: '#ffffff',
@@ -199,7 +206,7 @@ export default function ShelterCard({
         >
           🕒 Posted:{' '}
           <strong style={{ color: '#e2e8f0' }}>
-            {formatPostTime(shelter.created_at)}
+            {formatPostTime(postTimeRaw)}
           </strong>
         </p>
 

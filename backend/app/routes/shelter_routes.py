@@ -1,6 +1,6 @@
 import os
 import uuid
-
+from datetime import datetime, timezone
 from flask import Blueprint, current_app, jsonify, request
 from werkzeug.utils import secure_filename
 
@@ -76,8 +76,12 @@ def report_shelter():
                 )
                 os.makedirs(upload_folder, exist_ok=True)
 
-                file.save(os.path.join(upload_folder, filename))
-                image_url = f"uploads/{filename}"
+                save_path = os.path.join(upload_folder, filename)
+                file.save(save_path)
+                image_url = f"/uploads/{filename}"
+
+        # Creation timestamp initialization
+        created_timestamp = datetime.now(timezone.utc)
 
         new_shelter = Shelter(
             name=name.strip(),
@@ -95,14 +99,19 @@ def report_shelter():
             facilities=facilities.strip(),
             image_url=image_url,
             created_by_role="user",
+            created_at=created_timestamp,
         )
 
         new_shelter.save()
 
+        # Format payload with explicit ISO creation time string
+        res_data = new_shelter.to_dict() if hasattr(new_shelter, 'to_dict') else {}
+        res_data['created_at'] = created_timestamp.isoformat()
+
         return jsonify({
             "status": "success",
             "message": "Shelter registered successfully.",
-            "data": new_shelter.to_dict(),
+            "data": res_data,
         }), 201
 
     except Exception as error:
@@ -114,20 +123,42 @@ def report_shelter():
 
 @shelter_bp.route("/shelters", methods=["GET"])
 def get_shelters():
+    """Fetch all reported shelters with formatted ISO creation timestamps."""
     try:
         shelters = Shelter.objects()
-        return jsonify([
-            shelter.to_dict() for shelter in shelters
-        ]), 200
+        results = []
+        for shelter in shelters:
+            data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+            
+            # Format explicit created_at or fallback to Mongo ObjectId timestamp
+            if hasattr(shelter, 'created_at') and shelter.created_at:
+                data['created_at'] = shelter.created_at.isoformat()
+            elif hasattr(shelter, 'id') and hasattr(shelter.id, 'generation_time'):
+                data['created_at'] = shelter.id.generation_time.isoformat()
+            else:
+                data['created_at'] = None
+
+            results.append(data)
+
+        return jsonify(results), 200
     except Exception as error:
+        print(f"MongoDB query error when fetching shelters: {error}")
         return jsonify({"message": str(error)}), 500
 
 
 @shelter_bp.route("/shelters/<shelter_id>", methods=["GET"])
 def get_shelter_by_id(shelter_id):
+    """Fetch a single shelter by ID."""
     try:
         shelter = Shelter.objects.get(id=shelter_id)
-        return jsonify(shelter.to_dict()), 200
+        data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+        
+        if hasattr(shelter, 'created_at') and shelter.created_at:
+            data['created_at'] = shelter.created_at.isoformat()
+        elif hasattr(shelter, 'id') and hasattr(shelter.id, 'generation_time'):
+            data['created_at'] = shelter.id.generation_time.isoformat()
+            
+        return jsonify(data), 200
     except Shelter.DoesNotExist:
         return jsonify({"message": "Shelter not found."}), 404
     except Exception as error:
@@ -167,10 +198,14 @@ def update_shelter_beds(shelter_id):
         shelter.occupied_beds = max(0, total_beds - available_beds)
         shelter.save()
 
+        res_data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+        if hasattr(shelter, 'created_at') and shelter.created_at:
+            res_data['created_at'] = shelter.created_at.isoformat()
+
         return jsonify({
             "status": "success",
             "message": "Available bed count updated.",
-            "data": shelter.to_dict(),
+            "data": res_data,
         }), 200
 
     except Shelter.DoesNotExist:
@@ -181,6 +216,7 @@ def update_shelter_beds(shelter_id):
 
 @shelter_bp.route("/shelters/<shelter_id>/risk", methods=["PATCH", "PUT"])
 def update_shelter_risk(shelter_id):
+    """Update risk level and available bed capacity."""
     try:
         data = request.get_json() or {}
         shelter = Shelter.objects.get(id=shelter_id)
@@ -206,9 +242,13 @@ def update_shelter_risk(shelter_id):
 
         shelter.save()
 
+        res_data = shelter.to_dict() if hasattr(shelter, 'to_dict') else {}
+        if hasattr(shelter, 'created_at') and shelter.created_at:
+            res_data['created_at'] = shelter.created_at.isoformat()
+
         return jsonify({
             "status": "success",
-            "data": shelter.to_dict(),
+            "data": res_data,
         }), 200
 
     except Shelter.DoesNotExist:
@@ -219,6 +259,7 @@ def update_shelter_risk(shelter_id):
 
 @shelter_bp.route("/shelters/<shelter_id>", methods=["DELETE"])
 def delete_shelter(shelter_id):
+    """Delete a shelter by ID."""
     try:
         shelter = Shelter.objects.get(id=shelter_id)
         shelter.delete()
