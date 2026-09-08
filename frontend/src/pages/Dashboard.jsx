@@ -16,18 +16,33 @@ L.Icon.Default.mergeOptions({
   shadowUrl,
 });
 
-// Helper function to format creation/upload timestamps statically
-function formatUploadedTime(dateString) {
-  if (!dateString) return 'Timestamp unavailable';
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return 'Timestamp unavailable';
+// Robust date formatter handling MongoDB ObjectIds, $date objects, numbers, and strings
+function formatUploadedTime(dateInput) {
+  if (!dateInput) return 'Timestamp unavailable';
+
+  let dateVal = dateInput;
+
+  if (typeof dateVal === 'object' && dateVal !== null && dateVal.$date) {
+    dateVal = dateVal.$date;
+  }
+
+  if (typeof dateVal === 'number') {
+    dateVal = dateVal < 10000000000 ? dateVal * 1000 : dateVal;
+  }
+
+  const date = new Date(dateVal);
+
+  if (isNaN(date.getTime())) {
+    return 'Timestamp unavailable';
+  }
 
   return date.toLocaleString('en-US', {
     month: 'short',
-    day: 'numeric',
+    day: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: true,
   });
 }
 
@@ -216,7 +231,7 @@ function LiveMap({ activeLayer, incidents, shelters, selectedShelter, onShelterS
           fillOpacity: 0.9,
         })
           .bindTooltip(
-            `<b>${shelter.name}</b><br/>ML Safety: <b>${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}<br/>Reported: ${formatUploadedTime(shelter.created_at)}`
+            `<b>${shelter.name}</b><br/>Status: <b style="color:${shelter.is_safe ? '#53b889' : '#d94a5f'}">${shelter.is_safe ? 'Safe' : 'Unsafe'}</b><br/>Distance: ${shelter.distance}<br/>Reported: ${formatUploadedTime(shelter.created_at)}`
           )
           .on('click', () => onShelterSelect(shelter));
 
@@ -275,10 +290,32 @@ export default function Dashboard() {
     setSafeRoute(null);
   }, [selectedShelter]);
 
+  // Load verified incident data
   useEffect(() => {
     API.get('/incidents/verified')
       .then((res) => setIncidents(res.data.data || res.data || []))
       .catch((err) => console.error('Error loading verified incidents:', err));
+  }, []);
+
+  // Check if shelter coordinates are within 2.0 km of any reported incident
+  const isShelterNearIncident = useCallback((shelterLat, shelterLng, incidentList) => {
+    if (!incidentList || incidentList.length === 0) return false;
+
+    return incidentList.some((inc) => {
+      let incLat = inc.lat;
+      let incLng = inc.lng || inc.lon;
+
+      if (!incLat && inc.location?.coordinates) {
+        incLng = inc.location.coordinates[0];
+        incLat = inc.location.coordinates[1];
+      }
+
+      if (incLat && incLng) {
+        const distToIncident = parseFloat(calculateDistance(shelterLat, shelterLng, incLat, incLng));
+        return distToIncident <= 2.0; // 2km hazard buffer
+      }
+      return false;
+    });
   }, []);
 
   const checkRouteHasHazards = (geometryCoordinates, hazardsList) => {
@@ -453,37 +490,77 @@ export default function Dashboard() {
       const response = await API.post('/predict-shelters-risk', { lat, lng }, { signal: controller.signal });
       const rawShelters = response.data.data || response.data || [];
 
-      const formattedShelters = rawShelters.map((s, idx) => ({
-        ...s,
-        id: s.id || s._id || `shelter-${idx}`,
-        lng: s.lon || s.lng,
-        distance: `${calculateDistance(lat, lng, s.lat, s.lon || s.lng)} km`,
-        facilities: s.facilities || 'Water, Emergency Shelter, Power',
-        total_beds:
-          s.total_beds !== undefined && s.total_beds !== null
-            ? Number(s.total_beds)
-            : s.capacity
-            ? Number(s.capacity)
-            : 300,
-        available_beds:
-          s.available_beds !== undefined && s.available_beds !== null
-            ? Number(s.available_beds)
-            : s.capacity
-            ? Number(s.capacity) - (Number(s.occupied_beds) || 0)
-            : 150,
-        occupied_beds:
-          s.occupied_beds !== undefined && s.occupied_beds !== null
-            ? Number(s.occupied_beds)
-            : 0,
-        location_name: s.location_name || '',
-        // Use reported timestamp from API response or lock static ISO string once
-        created_at: s.created_at || s.createdAt || s.timestamp || s.updatedAt || null,
-        photoUrl: s.photoUrl || s.photo_url || s.image || s.imageUrl || null,
-      }));
+      const processedShelters = rawShelters
+        .map((s, idx) => {
+          const shelterLat = s.lat;
+          const shelterLng = s.lon || s.lng;
+          const distNum = parseFloat(calculateDistance(lat, lng, shelterLat, shelterLng));
 
-      setShelters(formattedShelters);
-      if (formattedShelters.length > 0) {
-        setSelectedShelter(formattedShelters[0]);
+          const exactCreated =
+            s.created_at ||
+            s.createdAt ||
+            s.timestamp ||
+            s.updatedAt ||
+            (s.date ? s.date : null);
+
+          const isAdminOrUserAdded =
+            s.is_admin ||
+            s.is_official ||
+            s.source === 'admin' ||
+            (s.name && s.name.toLowerCase().includes('(official)'));
+
+          // Check if near incident hazard zone
+          const nearIncident = isShelterNearIncident(shelterLat, shelterLng, incidents);
+
+          // Mark unsafe if near incident or explicitly labeled unsafe by ML backend
+          const isSafe = nearIncident ? false : s.is_safe !== undefined ? s.is_safe : true;
+          const riskLevel = nearIncident
+            ? 'High Risk (Proximity to Incident)'
+            : s.risk_level || (isSafe ? 'Low Risk' : 'High Risk');
+
+          return {
+            ...s,
+            id: s.id || s._id || `shelter-${idx}`,
+            lng: shelterLng,
+            distNum,
+            distance: `${distNum.toFixed(1)} km`,
+            is_safe: isSafe,
+            risk_level: riskLevel,
+            facilities: s.facilities || 'Water, Emergency Shelter, Power',
+            total_beds:
+              s.total_beds !== undefined && s.total_beds !== null
+                ? Number(s.total_beds)
+                : s.capacity
+                ? Number(s.capacity)
+                : 300,
+            available_beds:
+              s.available_beds !== undefined && s.available_beds !== null
+                ? Number(s.available_beds)
+                : s.capacity
+                ? Number(s.capacity) - (Number(s.occupied_beds) || 0)
+                : 150,
+            occupied_beds:
+              s.occupied_beds !== undefined && s.occupied_beds !== null
+                ? Number(s.occupied_beds)
+                : 0,
+            location_name: s.location_name || '',
+            created_at: exactCreated,
+            photoUrl: s.photoUrl || s.photo_url || s.image || s.imageUrl || null,
+            is_admin: isAdminOrUserAdded,
+          };
+        })
+        .filter((s) => s.distNum <= 20.0) // Strictly within 20 km
+        .sort((a, b) => {
+          if (a.is_admin && !b.is_admin) return -1;
+          if (!a.is_admin && b.is_admin) return 1;
+          return a.distNum - b.distNum;
+        });
+
+      setShelters(processedShelters);
+      if (processedShelters.length > 0) {
+        setSelectedShelter(processedShelters[0]);
+      } else {
+        setSelectedShelter(null);
       }
     } catch (err) {
       if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED') {
@@ -494,12 +571,17 @@ export default function Dashboard() {
         setLoadingShelters(false);
       }
     }
-  }, []);
+  }, [incidents, isShelterNearIncident]);
 
-  // Updated to handle both static reported timestamp and image uploads
   const handleShelterAdded = (newShelter) => {
     const shelterLat = parseFloat(newShelter.lat || userCoords.lat);
     const shelterLng = parseFloat(newShelter.lon || newShelter.lng || userCoords.lng);
+    const distNum = parseFloat(calculateDistance(userCoords.lat, userCoords.lng, shelterLat, shelterLng));
+
+    if (distNum > 20.0) {
+      alert('Shelter is farther than 20 km from your location.');
+      return;
+    }
 
     const exactTimestamp =
       newShelter.created_at || newShelter.createdAt || newShelter.timestamp || new Date().toISOString();
@@ -511,19 +593,35 @@ export default function Dashboard() {
       newShelter.imageUrl ||
       (newShelter.photo && typeof newShelter.photo === 'string' ? newShelter.photo : null);
 
+    const nearIncident = isShelterNearIncident(shelterLat, shelterLng, incidents);
+    const isSafe = nearIncident ? false : newShelter.is_safe !== undefined ? newShelter.is_safe : true;
+    const riskLevel = nearIncident ? 'High Risk (Proximity to Incident)' : newShelter.risk_level || 'Low Risk';
+
     const formattedNewShelter = {
       ...newShelter,
       id: newShelter.id || newShelter._id || `shelter-${Date.now()}`,
       lat: shelterLat,
       lng: shelterLng,
-      distance: `${calculateDistance(userCoords.lat, userCoords.lng, shelterLat, shelterLng)} km`,
-      is_safe: newShelter.is_safe !== undefined ? newShelter.is_safe : true,
-      risk_level: newShelter.risk_level || 'Low Risk',
+      distNum,
+      distance: `${distNum.toFixed(1)} km`,
+      is_safe: isSafe,
+      risk_level: riskLevel,
       created_at: exactTimestamp,
       photoUrl: uploadedImage,
+      is_admin: true,
     };
 
-    setShelters((prevShelters) => [formattedNewShelter, ...prevShelters]);
+    setShelters((prevShelters) => {
+      const updated = [formattedNewShelter, ...prevShelters];
+      return updated
+        .filter((s) => s.distNum <= 20.0)
+        .sort((a, b) => {
+          if (a.is_admin && !b.is_admin) return -1;
+          if (!a.is_admin && b.is_admin) return 1;
+          return a.distNum - b.distNum;
+        });
+    });
+
     setSelectedShelter(formattedNewShelter);
   };
 
@@ -655,7 +753,7 @@ export default function Dashboard() {
               </span>
             </>
           ) : (
-            <span>{loadingShelters ? 'Analyzing risk levels for local shelters...' : 'Searching 10km radius'}</span>
+            <span>{loadingShelters ? 'Analyzing risk levels for local shelters...' : 'Searching 20km radius'}</span>
           )}
           <span className="location-status" style={{ display: 'block', marginTop: '0.25rem' }}>
             {locationMessage}
@@ -695,7 +793,7 @@ export default function Dashboard() {
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}
         >
           <div>
-            <h2>Nearby Relief Shelters (10 km)</h2>
+            <h2>Nearby Relief Shelters (20 km)</h2>
             <span className="section-count" style={{ display: 'block', marginTop: '0.25rem' }}>
               {loadingShelters ? 'Evaluating ML Safety...' : `${shelters.length} centers found`}
             </span>
