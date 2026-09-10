@@ -8,7 +8,7 @@ from bson.objectid import ObjectId
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
-from app.services.cv_service import verify_incident_image
+from app.services.cv_service import verify_incident_image, verify_resolution_image
 from app.services.weather_service import verify_with_weather
 
 
@@ -60,7 +60,6 @@ def get_community_confidence(upcount):
 
 def get_readable_location(latitude, longitude):
     """Convert GPS coordinates into a location name."""
-
     try:
         response = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
@@ -176,7 +175,7 @@ def init_incident_routes(db):
 
         cv_result = verify_incident_image(filepath)
 
-        if cv_result.get("status") == "invalid_image":
+        if cv_result.get("status") in ["invalid_image", "error"]:
             if os.path.exists(filepath):
                 os.remove(filepath)
 
@@ -342,68 +341,251 @@ def init_incident_routes(db):
             "data": incidents,
         }), 200
 
-    @incident_bp.route("/incidents/resolve/<incident_id>", methods=["POST"])
-    def resolve_incident(incident_id):
-        try:
-            if (
-                "proof_image" not in request.files
-                and "image" not in request.files
-            ):
-                return jsonify({
-                    "status": "error",
-                    "message": "Resolution proof image is required.",
-                }), 400
+   @incident_bp.route("/incidents/resolve/<incident_id>", methods=["POST"])
+def resolve_incident(incident_id):
+    try:
+        query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+        
+        incident = db.incidents.find_one(query_filter)
+        if not incident:
+            return jsonify({"status": "error", "message": "Incident not found."}), 404
 
-            file = (
-                request.files.get("proof_image")
-                or request.files.get("image")
-            )
+        # Read uploaded image file
+        uploaded_file = None
+        if "image" in request.files:
+            uploaded_file = request.files["image"]
+        elif "proof" in request.files:
+            uploaded_file = request.files["proof"]
+        elif len(request.files) > 0:
+            uploaded_file = list(request.files.values())[0]
 
-            if not file or file.filename == "":
-                return jsonify({
-                    "status": "error",
-                    "message": "No file selected.",
-                }), 400
-
-            if not allowed_file(file.filename):
-                return jsonify({
-                    "status": "error",
-                    "message": "Only JPG, JPEG, PNG, and WEBP images are allowed.",
-                }), 400
-
-            original_filename = secure_filename(file.filename)
-            filename = f"proof_{uuid.uuid4().hex}_{original_filename}"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
-
-            if ObjectId.is_valid(incident_id):
-                query_filter = {"_id": ObjectId(incident_id)}
-            else:
-                query_filter = {"_id": incident_id}
-
-            existing_incident = db.incidents.find_one(query_filter)
-
-            if not existing_incident:
-                return jsonify({
-                    "status": "error",
-                    "message": "Incident not found in database.",
-                }), 404
-
-            db.incidents.delete_one(query_filter)
-
-            return jsonify({
-                "status": "success",
-                "message": (
-                    "Incident resolved successfully with proof image."
-                ),
-                "proof_url": f"uploads/{filename}",
-            }), 200
-
-        except Exception as error:
+        if not uploaded_file or uploaded_file.filename == "":
             return jsonify({
                 "status": "error",
-                "message": str(error),
-            }), 500
+                "message": "Please upload a proof image to resolve this incident."
+            }), 400
+
+        # Save temporarily
+        filename = f"proof_{uuid.uuid4().hex}_{secure_filename(uploaded_file.filename)}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        uploaded_file.save(filepath)
+
+        # Execute CV verification
+        cv_result = verify_resolution_image(filepath)
+
+        # Cleanup proof file
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+        # STRICT CHECK FOR DELETION
+        if cv_result.get("is_cleared") is True:
+            # ONLY DELETE IF IS_CLEARED IS EXPLICITLY TRUE
+            db.incidents.delete_one(query_filter)
+            return jsonify({
+                "status": "success",
+                "message": "Resolution verified! Incident removed from database.",
+                "resolution_cv": cv_result
+            }), 200
+        else:
+            # DO NOT DELETE FROM MONGO IF HAZARD IS PRESENT
+            return jsonify({
+                "status": "error",
+                "message": "Resolution rejected! Hazard is still present in proof image.",
+                "resolution_cv": cv_result
+            }), 400
+
+    except Exception as error:
+        return jsonify({"status": "error", "message": str(error)}), 500
+    def resolve_incident(incident_id):
+        try:
+            query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+            
+            incident = db.incidents.find_one(query_filter)
+            if not incident:
+                return jsonify({"status": "error", "message": "Incident not found."}), 404
+
+            # 1. Catch uploaded file from FormData (checks 'image' or 'proof' or any file)
+            uploaded_file = None
+            if "image" in request.files:
+                uploaded_file = request.files["image"]
+            elif "proof" in request.files:
+                uploaded_file = request.files["proof"]
+            elif len(request.files) > 0:
+                uploaded_file = list(request.files.values())[0]
+
+            if not uploaded_file or uploaded_file.filename == "":
+                return jsonify({
+                    "status": "error",
+                    "message": "Please upload a proof image to resolve this incident."
+                }), 400
+
+            # 2. Save file temporarily for CV analysis
+            filename = f"proof_{uuid.uuid4().hex}_{secure_filename(uploaded_file.filename)}"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            uploaded_file.save(filepath)
+
+            # 3. Analyze proof with CV model
+            cv_result = verify_resolution_image(filepath)
+
+            # Clean up uploaded proof file after verification
+            if os.path.exists(filepath):
+                os.remove(filepath)
+
+            # 4. Check if area is clear
+            if cv_result.get("is_cleared") is True:
+                # NO HAZARD DETECTED -> Delete from Database
+                db.incidents.delete_one(query_filter)
+                return jsonify({
+                    "status": "success",
+                    "message": "Verification passed! Clear road confirmed. Incident removed from database.",
+                    "resolution_cv": cv_result
+                }), 200
+            else:
+                # HAZARD STILL DETECTED -> DO NOT DELETE (No changes to database)
+                return jsonify({
+                    "status": "error",
+                    "message": "Verification failed! AI detected that a disaster hazard is still present in the image.",
+                    "resolution_cv": cv_result
+                }), 400
+
+        except Exception as error:
+            return jsonify({"status": "error", "message": str(error)}), 500
+        try:
+            query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+            
+            # Check if incident exists
+            incident = db.incidents.find_one(query_filter)
+            if not incident:
+                return jsonify({"status": "error", "message": "Incident not found."}), 404
+
+            filepath = None
+
+            # Case A: File uploaded via FormData
+            if "image" in request.files:
+                file = request.files["image"]
+                if file and file.filename != "":
+                    filename = f"res_{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+                    filepath = os.path.join(UPLOAD_FOLDER, filename)
+                    file.save(filepath)
+
+            # Case B: Filepath passed as JSON body
+            elif request.is_json:
+                data = request.get_json() or {}
+                filepath = data.get("filepath")
+
+            print(f"--- RESOLVE DEBUG ---")
+            print(f"Incident ID: {incident_id}")
+            print(f"Filepath received: {filepath}")
+
+            if not filepath or not os.path.exists(filepath):
+                # If no image path provided or file missing, allow manual resolution / bypass
+                print("No valid file provided. Deleting incident directly...")
+                db.incidents.delete_one(query_filter)
+                return jsonify({"status": "success", "message": "Incident resolved and removed."}), 200
+
+            # Run CV verification
+            cv_result = verify_resolution_image(filepath)
+            print(f"CV Result: {cv_result}")
+
+            # Check if CV confirms area is clear or if CV returned success/clear flag
+            is_cleared = cv_result.get("is_cleared", cv_result.get("status") == "success")
+
+            if is_cleared:
+                db.incidents.delete_one(query_filter)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                return jsonify({
+                    "status": "success",
+                    "message": "Clear photo verified! Incident removed from map.",
+                    "resolution_cv": cv_result
+                }), 200
+            else:
+                return jsonify({
+                    "status": "error",
+                    "message": cv_result.get("message", "Proof verification failed: AI still detects hazard."),
+                    "resolution_cv": cv_result
+                }), 400
+
+        except Exception as err:
+            print(f"Resolve Error: {err}")
+            return jsonify({"status": "error", "message": str(err)}), 500
+        data = request.get_json() or {}
+        proof_image_path = data.get("filepath")
+        
+        cv_result = None
+        if proof_image_path:
+            cv_result = verify_resolution_image(proof_image_path)
+            
+        # Check if the CV verification confirms the area is clear
+        is_cleared = cv_result.get("is_cleared", False) if cv_result else True
+
+        query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+
+        if is_cleared:
+            # Delete from MongoDB if clear photo is confirmed
+            db.incidents.delete_one(query_filter)
+            return jsonify({
+                "status": "success",
+                "message": "Area verified as clear. Incident successfully resolved and removed.",
+                "resolution_cv": cv_result
+            }), 200
+        else:
+            # Keep as active if hazard is still detected
+            return jsonify({
+                "status": "error",
+                "message": "Proof verification failed: AI detected that an active hazard is still present.",
+                "resolution_cv": cv_result
+            }), 400
+        data = request.get_json() or {}
+        proof_image_path = data.get("filepath")
+        
+        cv_result = None
+        if proof_image_path:
+            cv_result = verify_resolution_image(proof_image_path)
+        
+        # Update status in MongoDB using the passed `db` instance
+        query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+        db.incidents.update_one(
+            query_filter,
+            {"$set": {
+                "status": "RESOLVED",
+                "resolution_cv_verification": cv_result,
+                "updated_at": datetime.utcnow()
+            }}
+        )
+        
+        return jsonify({
+            "message": "Incident marked as resolved",
+            "resolution_cv": cv_result
+        }), 200
+
+    @incident_bp.route("/admin/incidents/<incident_id>/action", methods=["POST"])
+    def admin_incident_action(incident_id):
+        try:
+            data = request.get_json() or {}
+            action = str(data.get("action", "")).lower() # "approve" or "reject"
+            
+            query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+
+            if action in ["approve", "delete"]:
+                # Admin approves resolution -> Delete incident from MongoDB
+                db.incidents.delete_one(query_filter)
+                return jsonify({"status": "success", "message": "Incident resolution approved and deleted from database."}), 200
+
+            elif action == "reject":
+                # Admin rejects resolution -> Revert status back to active (VERIFIED)
+                db.incidents.update_one(query_filter, {
+                    "$set": {
+                        "status": "VERIFIED",
+                        "resolution_proof_url": None,
+                        "updated_at": datetime.utcnow()
+                    }
+                })
+                return jsonify({"status": "success", "message": "Resolution rejected. Incident remains active in database."}), 200
+
+            return jsonify({"status": "error", "message": "Invalid action."}), 400
+        except Exception as error:
+            return jsonify({"status": "error", "message": str(error)}), 500
 
     @incident_bp.route("/predict-shelters-risk", methods=["POST"])
     def predict_shelter_risk():

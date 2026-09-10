@@ -421,7 +421,7 @@ export default function AdminDashboard() {
                         <td>{incident.status}</td>
 
                         <td>
-                          {incident.status === 'PENDING' && (
+                          {(incident.status === 'PENDING' || incident.status === 'PENDING_ADMIN_APPROVAL') && (
                             <>
                               <button
                                 onClick={() =>

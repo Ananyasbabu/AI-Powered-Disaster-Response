@@ -6,6 +6,10 @@ from app.models.shelter import Shelter
 
 admin_bp = Blueprint("admin", __name__)
 
+# Hazardous computer vision classes
+HAZARD_CLASSES = {"flood", "waterlogging", "fallen_tree", "landslide", "debris"}
+CONFIDENCE_THRESHOLD = 0.40
+
 
 def init_admin_routes(mongo_db):
 
@@ -16,7 +20,7 @@ def init_admin_routes(mongo_db):
         username = data.get("username")
         password = data.get("password")
 
-        # Basic auth check (replace with JWT or hashed DB check as needed)
+        # Basic auth check
         if username == "admin" and password == "admin123":
             return (
                 jsonify(
@@ -85,11 +89,13 @@ def init_admin_routes(mongo_db):
         data = request.get_json() or {}
         new_status = data.get("status")
 
-        if new_status not in ["VERIFIED", "REJECTED", "PENDING"]:
+        if new_status not in ["VERIFIED", "REJECTED", "PENDING", "PENDING_ADMIN_APPROVAL"]:
             return jsonify({"message": "Invalid status"}), 400
 
+        query_filter = {"_id": ObjectId(incident_id)} if ObjectId.is_valid(incident_id) else {"_id": incident_id}
+
         result = mongo_db.incidents.update_one(
-            {"_id": ObjectId(incident_id)},
+            query_filter,
             {
                 "$set": {
                     "status": new_status,
@@ -103,8 +109,61 @@ def init_admin_routes(mongo_db):
 
         return jsonify({"message": f"Incident updated to {new_status}"}), 200
 
-    # 4. Shelter Management (MongoEngine)
+    # 3b. Incident Resolution with Computer Vision Verification
+    @admin_bp.route("/admin/incidents/<incident_id>/resolve", methods=["POST"])
+    def resolve_incident_cv(incident_id):
+        if "image" not in request.files:
+            return jsonify({"message": "No proof image uploaded"}), 400
 
+        file = request.files["image"]
+
+        # Run your computer vision inference routine
+        # Replace run_cv_model with your actual ML model function call
+        cv_results = run_cv_model(file)
+
+        detected_labels = cv_results.get("detected_labels", [])
+        confidence_score = cv_results.get("confidence_score", 0.0)
+
+        # Check if active hazard is detected in the uploaded resolution image
+        hazard_detected = any(
+            label.lower() in HAZARD_CLASSES and confidence_score >= CONFIDENCE_THRESHOLD
+            for label in detected_labels
+        )
+
+        if hazard_detected:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "CV Verification Failed: Uploaded image still shows hazards (e.g., flood/debris). Incident remains active.",
+                        "cv_result": cv_results,
+                    }
+                ),
+                400,
+            )
+
+        # If image is clear of hazards, remove the incident from MongoDB
+        query_filter = (
+            {"_id": ObjectId(incident_id)}
+            if ObjectId.is_valid(incident_id)
+            else {"_id": incident_id}
+        )
+        result = mongo_db.incidents.delete_one(query_filter)
+
+        if result.deleted_count == 0:
+            return jsonify({"message": "Incident not found"}), 404
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "message": "Resolution verified by CV! Incident resolved and deleted from database.",
+                }
+            ),
+            200,
+        )
+
+    # 4. Shelter Management (MongoEngine)
     @admin_bp.route("/admin/shelters", methods=["GET"])
     def get_shelters():
         try:
@@ -125,8 +184,8 @@ def init_admin_routes(mongo_db):
                     "contact": getattr(s, "contact", ""),
                     "image_url": s.image_url,
                     "facilities": s.facilities,
-                    "status": s.status,
-                    "risk_level": s.risk_level,
+                    "status": getattr(s, "status", "Active"),
+                    "risk_level": getattr(s, "risk_level", "Low"),
                 }
                 for s in shelters
             ]
@@ -202,7 +261,7 @@ def init_admin_routes(mongo_db):
                     {
                         "message": "Shelter added",
                         "id": str(new_shelter.id),
-                        "data": new_shelter.to_dict(),
+                        "data": new_shelter.to_dict() if hasattr(new_shelter, 'to_dict') else {},
                     }
                 ),
                 201,
